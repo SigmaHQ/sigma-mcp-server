@@ -203,7 +203,12 @@ def create_and_validate_sigma_rule(description: str) -> list[Message]:
             f"4. If validate_rule returns any issues, fix them in the YAML and call "
             f"validate_rule again.\n"
             f"5. Repeat step 4 until validate_rule returns an empty list.\n"
-            f"6. Present the final validated Sigma rule YAML."
+            f"6. Derive a filename from the rule's `title` field: lowercase, "
+            f"spaces replaced by underscores, with a `.yml` extension "
+            f"(e.g. title 'Lateral Movement via PsExec' → "
+            f"`lateral_movement_via_psexec.yml`).\n"
+            f"7. Save the final validated rule YAML to that file using your "
+            f"available file-writing tools."
         )
     ]
 
@@ -237,7 +242,13 @@ def create_sigma_rules_from_url(url: str) -> list[Message]:
             f"   d. If validate_rule returns any issues, fix them and call "
             f"validate_rule again.\n"
             f"   e. Repeat until validate_rule returns an empty list.\n"
-            f"4. Present all final validated Sigma rule YAMLs, one per detection opportunity."
+            f"   f. Derive a filename from the rule's `title` field: lowercase, "
+            f"spaces replaced by underscores, with a `.yml` extension "
+            f"(e.g. title 'Lateral Movement via PsExec' → "
+            f"`lateral_movement_via_psexec.yml`).\n"
+            f"   g. Save the validated rule YAML to that file using your "
+            f"available file-writing tools.\n"
+            f"4. After all rules are saved, summarise the files that were written."
         )
     ]
 
