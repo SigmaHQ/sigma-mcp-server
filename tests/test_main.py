@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 from fastmcp.client import Client
+from mcp.types import TextContent
 
 from sigma.mcp.main import (
     _get_active_validators,
@@ -389,3 +390,49 @@ class TestMain:
         with patch.object(mcp, "run") as mock_run:
             main()
             mock_run.assert_called_once()
+
+
+class TestPrompts:
+    @pytest.mark.anyio
+    async def test_prompt_create_listed(self) -> None:
+        async with Client(mcp) as client:
+            prompts = await client.list_prompts()
+            names = [p.name for p in prompts]
+            assert "create_and_validate_sigma_rule" in names
+
+    @pytest.mark.anyio
+    async def test_prompt_create_content(self) -> None:
+        async with Client(mcp) as client:
+            result = await client.get_prompt(
+                "create_and_validate_sigma_rule",
+                {"description": "lateral movement via PsExec"},
+            )
+            text = " ".join(
+                msg.content.text
+                for msg in result.messages
+                if isinstance(msg.content, TextContent)
+            )
+            assert "validate_rule" in text
+            assert "lateral movement via PsExec" in text
+
+    @pytest.mark.anyio
+    async def test_prompt_url_listed(self) -> None:
+        async with Client(mcp) as client:
+            prompts = await client.list_prompts()
+            names = [p.name for p in prompts]
+            assert "create_sigma_rules_from_url" in names
+
+    @pytest.mark.anyio
+    async def test_prompt_url_content(self) -> None:
+        async with Client(mcp) as client:
+            result = await client.get_prompt(
+                "create_sigma_rules_from_url",
+                {"url": "https://example.com/blog"},
+            )
+            text = " ".join(
+                msg.content.text
+                for msg in result.messages
+                if isinstance(msg.content, TextContent)
+            )
+            assert "validate_rule" in text
+            assert "https://example.com/blog" in text

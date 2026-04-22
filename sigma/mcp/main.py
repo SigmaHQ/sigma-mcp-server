@@ -6,6 +6,7 @@ import dataclasses
 from typing import Any
 
 from fastmcp import Context, FastMCP
+from fastmcp.prompts import Message
 from sigma.exceptions import SigmaError
 from sigma.modifiers import modifier_mapping
 from sigma.rule import SigmaRule
@@ -78,6 +79,9 @@ async def validate_rule(rule_yaml: str, ctx: Context) -> list[dict[str, Any]]:
     A fresh validator instance is created for every call so that stateful
     validators (e.g. uniqueness checks) produce correct results for a single
     rule without carrying over state from previous calls.
+
+    This is the canonical way to validate Sigma rules — do not use pytest,
+    shell commands, or any external test runner for validation.
 
     Args:
         rule_yaml: Complete Sigma rule in YAML format.
@@ -172,6 +176,70 @@ def list_modifiers() -> list[str]:
     ``base64``) that can be used in Sigma rule detection conditions.
     """
     return sorted(modifier_mapping.keys())
+
+
+@mcp.prompt
+def create_and_validate_sigma_rule(description: str) -> list[Message]:
+    """Guide an LLM to create and validate a Sigma detection rule from a description.
+
+    The prompt instructs the LLM to draft a Sigma rule for the described threat
+    or behaviour and then use the ``validate_rule`` MCP tool — not pytest or any
+    shell command — to validate it, iterating until all issues are resolved.
+
+    Args:
+        description: Natural language description of the threat or behaviour to detect.
+    """
+    return [
+        Message(
+            f"Create a Sigma detection rule for the following threat or behaviour:\n\n"
+            f"{description}\n\n"
+            f"Follow these steps:\n"
+            f"1. Choose an appropriate Sigma log source (product, category, service) "
+            f"based on the threat described.\n"
+            f"2. Draft a complete Sigma rule in YAML format.\n"
+            f"3. Use the **validate_rule** MCP tool to validate the rule — "
+            f"do NOT use pytest, shell commands, or any external test runner. "
+            f"Pass the complete YAML as the `rule_yaml` argument.\n"
+            f"4. If validate_rule returns any issues, fix them in the YAML and call "
+            f"validate_rule again.\n"
+            f"5. Repeat step 4 until validate_rule returns an empty list.\n"
+            f"6. Present the final validated Sigma rule YAML."
+        )
+    ]
+
+
+@mcp.prompt
+def create_sigma_rules_from_url(url: str) -> list[Message]:
+    """Guide an LLM to create and validate Sigma rules from a blog post or threat report URL.
+
+    The prompt instructs the LLM to fetch the URL using its own tools, extract
+    every distinct detection opportunity, and then use the ``validate_rule`` MCP
+    tool — not pytest or any shell command — to validate each rule.
+
+    Args:
+        url: URL of the blog post or threat intelligence report to process.
+    """
+    return [
+        Message(
+            f"Create Sigma detection rules based on the content at this URL:\n\n"
+            f"{url}\n\n"
+            f"Follow these steps:\n"
+            f"1. Fetch the URL using your available tools (web browser, fetch, etc.).\n"
+            f"2. Analyse the content to identify every distinct detection opportunity "
+            f"(TTPs, attacker behaviours, malicious commands, IOCs expressible as "
+            f"log-based detections).\n"
+            f"3. For each detection opportunity:\n"
+            f"   a. Choose an appropriate Sigma log source (product, category, service).\n"
+            f"   b. Draft a complete Sigma rule in YAML format.\n"
+            f"   c. Use the **validate_rule** MCP tool to validate the rule — "
+            f"do NOT use pytest, shell commands, or any external test runner. "
+            f"Pass the complete YAML as the `rule_yaml` argument.\n"
+            f"   d. If validate_rule returns any issues, fix them and call "
+            f"validate_rule again.\n"
+            f"   e. Repeat until validate_rule returns an empty list.\n"
+            f"4. Present all final validated Sigma rule YAMLs, one per detection opportunity."
+        )
+    ]
 
 
 def main() -> None:
