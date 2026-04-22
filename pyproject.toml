@@ -1,0 +1,47 @@
+[project]
+name = "sigma-mcp-server"
+version = "0.1.0"
+description = "Sigma detection language MCP server"
+authors = [
+    {name = "Thomas Patzke",email = "thomas@patzke.org"}
+]
+license = {text = "MIT"}
+requires-python = "^3.10"
+dependencies = [
+    "fastmcp (>=3.2.4,<4.0.0)",
+    "pysigma (>=1.3.3,<2.0.0)"
+]
+
+[project.scripts]
+sigma-mcp-server = "sigma.mcp.main:main"
+
+[tool.poetry]
+packages = [{include = "sigma"}]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "pytest (>=9.0.3,<10.0.0)",
+    "pytest-cov (>=7.1.0,<8.0.0)",
+    "black (>=26.3.1,<27.0.0)",
+    "mypy (>=1.20.2,<2.0.0)"
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["sigma/mcp"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 95
+
+[tool.mypy]
+strict = true
+ignore_missing_imports = true
+namespace_packages = true
+explicit_package_bases = true
