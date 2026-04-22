@@ -1,4 +1,4 @@
-# sigma-mcp-server
+# Sigma MCP Server
 
 An [MCP](https://modelcontextprotocol.io/) server that exposes
 [pySigma](https://github.com/SigmaHQ/pySigma) functionality to AI assistants
