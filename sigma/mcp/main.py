@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
-import json as _json
+import json
 import re
 from typing import Any
 
@@ -512,11 +512,11 @@ async def list_windows_events() -> list[dict[str, str]]:
     """
     # Fetch the GitHub API directory listing (1 request, cached as JSON text)
     raw_listing = await _fetch_spec(_WIN_EVENTS_INDEX_URL)
-    entries_raw: list[Any] = _json.loads(raw_listing)
+    raw_entries: list[Any] = json.loads(raw_listing)
 
     # Collect event IDs from event-*.md filenames
     event_ids: list[str] = []
-    for entry in entries_raw:
+    for entry in raw_entries:
         name: str = entry.get("name", "")
         m = re.match(r"^event-(\d+)\.md$", name)
         if m:
