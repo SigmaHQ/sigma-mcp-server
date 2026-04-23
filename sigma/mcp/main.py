@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import dataclasses
+import importlib.resources
+import json
 import re
 from typing import Any
 
@@ -36,6 +38,17 @@ _SPEC_URL_RULES = (
 )
 
 _spec_cache: dict[str, str] = {}
+
+_WIN_EVENTS_RAW_BASE = (
+    "https://raw.githubusercontent.com/duckxing/windows-itpro-docs/master/"
+    "windows/keep-secure/"
+)
+_win_event_content_cache: dict[str, str] = {}
+_WIN_EVENT_INDEX: dict[str, dict[str, str]] = json.loads(
+    importlib.resources.files("sigma.mcp")
+    .joinpath("data/windows_event_index.json")
+    .read_text(encoding="utf-8")
+)
 
 
 async def _fetch_spec(url: str) -> str:
@@ -191,6 +204,38 @@ def _parse_tags(markdown: str) -> dict[str, str]:
         description = " ".join(prose_lines).strip()
         results[name] = description
     return results
+
+
+def _parse_win_event_title(markdown: str) -> str:
+    """Extract the H1 title from a Windows event markdown document.
+
+    Args:
+        markdown: Raw Markdown text of an ``event-NNNN.md`` file.
+
+    Returns:
+        The text of the first H1 heading, or an empty string if not found.
+    """
+    m = re.search(r"^# (.+)$", markdown, re.MULTILINE)
+    if not m:
+        return ""
+    title = m.group(1).strip()
+    # Strip leading "NNNN(X): " prefix (e.g. "4624(S): ")
+    title = re.sub(r"^\d+\([^)]+\):\s*", "", title)
+    return title
+
+
+def _parse_win_event_channel(markdown: str) -> str:
+    """Extract the Windows event log channel from the embedded XML snippet.
+
+    Args:
+        markdown: Raw Markdown text of an ``event-NNNN.md`` file.
+
+    Returns:
+        Lowercased channel name (e.g. ``"security"``), or ``"security"`` as
+        the default when the ``<Channel>`` element is absent.
+    """
+    m = re.search(r"<Channel>([^<]+)</Channel>", markdown, re.IGNORECASE)
+    return m.group(1).strip().lower() if m else "security"
 
 
 # Session state keys
@@ -392,11 +437,9 @@ async def get_fields_for_category(category: str) -> str:
         JSON-encoded sorted list of field name strings, or ``[]`` if the
         category is not documented in the spec.
     """
-    import json as _json
-
     markdown = await _fetch_spec(_SPEC_URL_TAXONOMY)
     fields_map = _parse_fields(markdown)
-    return _json.dumps(fields_map.get(category, []))
+    return json.dumps(fields_map.get(category, []))
 
 
 @mcp.resource("sigma://tags")
@@ -429,6 +472,46 @@ async def get_specification() -> str:
     return await _fetch_spec(_SPEC_URL_RULES)
 
 
+@mcp.resource("sigma://events/windows")
+def list_windows_events() -> dict[str, dict[str, str]]:
+    """List all documented Windows Security Auditing events grouped by log channel.
+
+    Returns the statically bundled event index as a dict mapping channel name
+    (e.g. ``"security"``) to a nested dict mapping event ID string (e.g.
+    ``"4624"``) to the event title string.
+    Use this resource to identify relevant event IDs when writing Sigma rules
+    that target Windows Security logs (``product: windows, service: security``).
+    Then read ``sigma://events/windows/{channel}/{event_id}`` for the full
+    field-level description of a specific event.
+    """
+    return _WIN_EVENT_INDEX
+
+
+@mcp.resource("sigma://events/windows/{channel}/{event_id}")
+async def get_windows_event(channel: str, event_id: str) -> str:
+    """Return the full Microsoft documentation for a Windows event as Markdown.
+
+    Fetched from duckxing/windows-itpro-docs GitHub mirror on first access
+    and cached for the server's lifetime. Includes event description, all field
+    definitions, and security monitoring recommendations.
+
+    Args:
+        channel: Log channel name, e.g. ``security``. Accepted for URI
+            consistency; routing is by ``event_id`` alone.
+        event_id: Numeric event ID string, e.g. ``4624``.
+
+    Returns:
+        Raw Markdown text of the event documentation page.
+    """
+    if event_id not in _win_event_content_cache:
+        url = f"{_WIN_EVENTS_RAW_BASE}event-{event_id}.md"
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as http:
+            response = await http.get(url)
+            response.raise_for_status()
+            _win_event_content_cache[event_id] = response.text
+    return _win_event_content_cache[event_id]
+
+
 @mcp.prompt
 def create_sigma_rule_from_description(description: str) -> list[Message]:
     """Guide an LLM to create and validate a Sigma detection rule from a description.
@@ -447,7 +530,11 @@ def create_sigma_rule_from_description(description: str) -> list[Message]:
             f"Follow these steps:\n"
             f"1. Read the **sigma://logsources** resource to find valid product/"
             f"category/service combinations, then choose the most appropriate log "
-            f"source for the threat described.\n"
+            f"source for the threat described. "
+            f"If the log source uses ``product: windows, service: security``, "
+            f"also read **sigma://events/windows** to identify relevant event "
+            f"IDs, then read **sigma://events/windows/security/{{event_id}}** "
+            f"(substituting the event ID) for detailed field descriptions.\n"
             f"2. Read the **sigma://fields/{{category}}** resource (substituting the "
             f"chosen category) to discover the correct field names for that log source. "
             f"Read **sigma://modifiers** for valid field-value modifiers. "
@@ -494,6 +581,11 @@ def create_sigma_rules_from_url(url: str) -> list[Message]:
             f"product/category/service combinations. Read **sigma://modifiers** for "
             f"valid field-value modifiers and **sigma://tags** for tag namespaces.\n"
             f"Read **sigma://specification** to get a full understanding of the Sigma rule format.\n"
+            f"If any detection targets Windows Security logs "
+            f"(``product: windows, service: security``), read "
+            f"**sigma://events/windows** to identify relevant event IDs, then "
+            f"read **sigma://events/windows/security/{{event_id}}** (substituting "
+            f"the event ID) for detailed field descriptions.\n"
             f"4. For each detection opportunity:\n"
             f"   a. Choose an appropriate Sigma log source from **sigma://logsources**.\n"
             f"   b. Read **sigma://fields/{{category}}** (substituting the chosen "

@@ -18,6 +18,7 @@ sigma-mcp-server = "sigma.mcp.main:main"
 
 [tool.poetry]
 packages = [{include = "sigma"}]
+include = ["sigma/mcp/data/*.json"]
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

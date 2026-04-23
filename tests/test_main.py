@@ -18,10 +18,14 @@ from sigma.mcp.main import (
     _parse_fields,
     _parse_logsources,
     _parse_tags,
+    _parse_win_event_channel,
+    _parse_win_event_title,
     _spec_cache,
     _SPEC_URL_RULES,
     _SPEC_URL_TAGS,
     _SPEC_URL_TAXONOMY,
+    _WIN_EVENT_INDEX,
+    _win_event_content_cache,
     all_validators,
     mcp,
 )
@@ -773,13 +777,13 @@ class TestPrompts:
         async with Client(mcp) as client:
             prompts = await client.list_prompts()
             names = [p.name for p in prompts]
-            assert "create_and_validate_sigma_rule" in names
+            assert "create_sigma_rule_from_description" in names
 
     @pytest.mark.anyio
     async def test_prompt_create_content(self) -> None:
         async with Client(mcp) as client:
             result = await client.get_prompt(
-                "create_and_validate_sigma_rule",
+                "create_sigma_rule_from_description",
                 {"description": "lateral movement via PsExec"},
             )
             text = " ".join(
@@ -811,3 +815,148 @@ class TestPrompts:
             )
             assert "validate_rule" in text
             assert "https://example.com/blog" in text
+
+
+# ---------------------------------------------------------------------------
+# Windows event helpers and resources
+# ---------------------------------------------------------------------------
+
+_WIN_EVENTS_SAMPLE_MD = """\
+# 4624(S): An account was successfully logged on.
+
+<Event>
+  <Channel>Security</Channel>
+  <EventID>4624</EventID>
+</Event>
+
+Some description here.
+"""
+
+
+@pytest.fixture(autouse=True)
+def clear_win_event_content_cache() -> Generator[None, None, None]:
+    """Clear the Windows event content cache before and after each test."""
+    _win_event_content_cache.clear()
+    yield
+    _win_event_content_cache.clear()
+
+
+class TestParseWinEventTitle:
+    def test_extracts_h1_title(self) -> None:
+        assert _parse_win_event_title(_WIN_EVENTS_SAMPLE_MD) == (
+            "An account was successfully logged on."
+        )
+
+    def test_returns_empty_string_when_no_h1(self) -> None:
+        assert _parse_win_event_title("No heading here\nJust text.") == ""
+
+    def test_strips_whitespace(self) -> None:
+        md = "#  Spaced Title  \nBody"
+        assert _parse_win_event_title(md) == "Spaced Title"
+
+
+class TestParseWinEventChannel:
+    def test_extracts_security_channel(self) -> None:
+        assert _parse_win_event_channel(_WIN_EVENTS_SAMPLE_MD) == "security"
+
+    def test_lowercases_channel(self) -> None:
+        md = "<Channel>SECURITY</Channel>"
+        assert _parse_win_event_channel(md) == "security"
+
+    def test_defaults_to_security_when_absent(self) -> None:
+        assert _parse_win_event_channel("No channel XML here.") == "security"
+
+
+class TestWinEventIndex:
+    def test_index_is_non_empty_dict(self) -> None:
+        assert isinstance(_WIN_EVENT_INDEX, dict)
+        assert len(_WIN_EVENT_INDEX) > 0
+
+    def test_security_channel_present(self) -> None:
+        assert "security" in _WIN_EVENT_INDEX
+
+    def test_event_4624_present(self) -> None:
+        assert "4624" in _WIN_EVENT_INDEX["security"]
+
+    def test_event_titles_are_strings(self) -> None:
+        for event_id, title in _WIN_EVENT_INDEX["security"].items():
+            assert isinstance(event_id, str)
+            assert isinstance(title, str)
+            assert len(title) > 0
+
+
+class TestWindowsEventsResource:
+    @pytest.mark.anyio
+    async def test_list_windows_events_returns_dict(self) -> None:
+        async with Client(mcp) as client:
+            contents = await client.read_resource("sigma://events/windows")
+            data = json.loads(contents[0].text)
+            assert isinstance(data, dict)
+
+    @pytest.mark.anyio
+    async def test_list_windows_events_has_security_channel(self) -> None:
+        async with Client(mcp) as client:
+            contents = await client.read_resource("sigma://events/windows")
+            data = json.loads(contents[0].text)
+            assert "security" in data
+
+    @pytest.mark.anyio
+    async def test_list_windows_events_security_values_are_strings(self) -> None:
+        async with Client(mcp) as client:
+            contents = await client.read_resource("sigma://events/windows")
+            data = json.loads(contents[0].text)
+            for _eid, title in data["security"].items():
+                assert isinstance(title, str)
+
+    @pytest.mark.anyio
+    async def test_get_windows_event_returns_markdown(self) -> None:
+        with patch("sigma.mcp.main.httpx.AsyncClient") as mock_client_cls:
+            mock_response = mock_client_cls.return_value.__aenter__.return_value
+            mock_response.get = mock_response.get
+            import asyncio
+
+            async def _fake_get(url: str) -> Any:
+                class _R:
+                    text = _WIN_EVENTS_SAMPLE_MD
+
+                    def raise_for_status(self) -> None:
+                        pass
+
+                return _R()
+
+            mock_response.get = _fake_get
+            async with Client(mcp) as client:
+                contents = await client.read_resource(
+                    "sigma://events/windows/security/4624"
+                )
+                assert "4624" in contents[0].text
+
+    @pytest.mark.anyio
+    async def test_get_windows_event_cached_after_first_fetch(self) -> None:
+        with patch("sigma.mcp.main.httpx.AsyncClient") as mock_client_cls:
+            mock_response = mock_client_cls.return_value.__aenter__.return_value
+
+            async def _fake_get(url: str) -> Any:
+                class _R:
+                    text = _WIN_EVENTS_SAMPLE_MD
+
+                    def raise_for_status(self) -> None:
+                        pass
+
+                return _R()
+
+            mock_response.get = _fake_get
+            async with Client(mcp) as client:
+                await client.read_resource("sigma://events/windows/security/4624")
+            assert "4624" in _win_event_content_cache
+
+    @pytest.mark.anyio
+    async def test_get_windows_event_uses_cache_on_second_call(self) -> None:
+        _win_event_content_cache["4624"] = _WIN_EVENTS_SAMPLE_MD
+        with patch("sigma.mcp.main.httpx.AsyncClient") as mock_client_cls:
+            async with Client(mcp) as client:
+                contents = await client.read_resource(
+                    "sigma://events/windows/security/4624"
+                )
+            mock_client_cls.assert_not_called()
+        assert _WIN_EVENTS_SAMPLE_MD in contents[0].text
