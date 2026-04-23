@@ -430,7 +430,7 @@ async def get_specification() -> str:
 
 
 @mcp.prompt
-def create_and_validate_sigma_rule(description: str) -> list[Message]:
+def create_sigma_rule_from_description(description: str) -> list[Message]:
     """Guide an LLM to create and validate a Sigma detection rule from a description.
 
     The prompt instructs the LLM to draft a Sigma rule for the described threat
