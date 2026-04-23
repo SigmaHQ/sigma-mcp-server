@@ -12,16 +12,20 @@ from fastmcp.client import Client
 from mcp.types import TextContent
 
 from sigma.mcp.main import (
+    _extract_win_event_channel,
     _fetch_spec,
     _get_active_validators,
     _issue_to_dict,
     _parse_fields,
     _parse_logsources,
     _parse_tags,
+    _parse_win_event_front_matter,
     _spec_cache,
     _SPEC_URL_RULES,
     _SPEC_URL_TAGS,
     _SPEC_URL_TAXONOMY,
+    _WIN_EVENTS_BASE_URL,
+    _WIN_EVENTS_INDEX_URL,
     all_validators,
     mcp,
 )
@@ -126,6 +130,80 @@ logsource, and detection.
 - status: One of stable, test, experimental, deprecated, unsupported.
 """
 
+# ---------------------------------------------------------------------------
+# Windows event knowledge-base fixtures
+# ---------------------------------------------------------------------------
+
+_WIN_EVENT_4624_MD = f"""\
+---
+title: 4624(S) An account was successfully logged on. (Windows 10)
+description: Describes security event 4624(S) An account was successfully logged on.
+ms.pagetype: security
+ms.prod: w10
+author: Mir0sh
+---
+
+# 4624(S): An account was successfully logged on.
+
+***Event XML:***
+```
+- <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+- <System>
+ <EventID>4624</EventID>
+ <Channel>Security</Channel>
+ </System>
+</Event>
+```
+
+Event details here.
+"""
+
+_WIN_EVENT_4625_MD = f"""\
+---
+title: 4625(F) An account failed to log on. (Windows 10)
+description: Describes security event 4625(F) An account failed to log on.
+ms.pagetype: security
+ms.prod: w10
+author: Mir0sh
+---
+
+# 4625(F): An account failed to log on.
+
+***Event XML:***
+```
+- <Event>
+- <System>
+ <EventID>4625</EventID>
+ <Channel>Security</Channel>
+ </System>
+</Event>
+```
+
+Event details here.
+"""
+
+# Minimal GitHub API JSON listing returned for _WIN_EVENTS_INDEX_URL
+_WIN_EVENT_INDEX_JSON = json.dumps(
+    [
+        {
+            "name": "event-4624.md",
+            "type": "file",
+            "download_url": f"{_WIN_EVENTS_BASE_URL}/event-4624.md",
+        },
+        {
+            "name": "event-4625.md",
+            "type": "file",
+            "download_url": f"{_WIN_EVENTS_BASE_URL}/event-4625.md",
+        },
+        # Non-event file — must be filtered out by list_windows_events
+        {
+            "name": "audit-logon.md",
+            "type": "file",
+            "download_url": f"{_WIN_EVENTS_BASE_URL}/audit-logon.md",
+        },
+    ]
+)
+
 
 @pytest.fixture(autouse=True)
 def prepopulate_spec_cache() -> Generator[None, None, None]:
@@ -137,11 +215,17 @@ def prepopulate_spec_cache() -> Generator[None, None, None]:
     _spec_cache[_SPEC_URL_TAXONOMY] = _TAXONOMY_MD
     _spec_cache[_SPEC_URL_TAGS] = _TAGS_MD
     _spec_cache[_SPEC_URL_RULES] = _RULES_MD
+    _spec_cache[_WIN_EVENTS_INDEX_URL] = _WIN_EVENT_INDEX_JSON
+    _spec_cache[f"{_WIN_EVENTS_BASE_URL}/event-4624.md"] = _WIN_EVENT_4624_MD
+    _spec_cache[f"{_WIN_EVENTS_BASE_URL}/event-4625.md"] = _WIN_EVENT_4625_MD
     yield
     # Clean up after each test so tests are isolated
     _spec_cache.pop(_SPEC_URL_TAXONOMY, None)
     _spec_cache.pop(_SPEC_URL_TAGS, None)
     _spec_cache.pop(_SPEC_URL_RULES, None)
+    _spec_cache.pop(_WIN_EVENTS_INDEX_URL, None)
+    _spec_cache.pop(f"{_WIN_EVENTS_BASE_URL}/event-4624.md", None)
+    _spec_cache.pop(f"{_WIN_EVENTS_BASE_URL}/event-4625.md", None)
 
 
 # ---------------------------------------------------------------------------
@@ -811,3 +895,176 @@ class TestPrompts:
             )
             assert "validate_rule" in text
             assert "https://example.com/blog" in text
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for Windows event markdown parsing helpers
+# ---------------------------------------------------------------------------
+
+
+class TestParseWinEventFrontMatter:
+    def test_returns_dict_with_title(self) -> None:
+        result = _parse_win_event_front_matter(_WIN_EVENT_4624_MD)
+        assert "title" in result
+        assert "4624" in result["title"]
+
+    def test_returns_dict_with_description(self) -> None:
+        result = _parse_win_event_front_matter(_WIN_EVENT_4624_MD)
+        assert "description" in result
+        assert result["description"] != ""
+
+    def test_keys_are_lowercased(self) -> None:
+        result = _parse_win_event_front_matter(_WIN_EVENT_4624_MD)
+        for key in result:
+            assert key == key.lower(), f"Key '{key}' is not lower-cased"
+
+    def test_dotted_keys_parsed(self) -> None:
+        result = _parse_win_event_front_matter(_WIN_EVENT_4624_MD)
+        assert "ms.pagetype" in result
+        assert result["ms.pagetype"] == "security"
+
+    def test_empty_dict_when_no_front_matter(self) -> None:
+        result = _parse_win_event_front_matter(
+            "# No front matter here\n\nJust content."
+        )
+        assert result == {}
+
+    def test_empty_dict_for_empty_string(self) -> None:
+        result = _parse_win_event_front_matter("")
+        assert result == {}
+
+
+class TestExtractWinEventChannel:
+    def test_extracts_security_channel(self) -> None:
+        result = _extract_win_event_channel(_WIN_EVENT_4624_MD)
+        assert result == "security"
+
+    def test_channel_is_lowercased(self) -> None:
+        md = "<Channel>SECURITY</Channel>"
+        result = _extract_win_event_channel(md)
+        assert result == "security"
+
+    def test_returns_empty_string_when_no_channel(self) -> None:
+        result = _extract_win_event_channel("# No XML here")
+        assert result == ""
+
+    def test_returns_empty_string_for_empty_input(self) -> None:
+        result = _extract_win_event_channel("")
+        assert result == ""
+
+    def test_strips_whitespace_from_channel(self) -> None:
+        md = "<Channel>  Security  </Channel>"
+        result = _extract_win_event_channel(md)
+        assert result == "security"
+
+
+# ---------------------------------------------------------------------------
+# Integration tests for the Windows event resources
+# ---------------------------------------------------------------------------
+
+
+class TestWindowsEventResources:
+    @pytest.mark.anyio
+    async def test_list_windows_events_returns_list(self) -> None:
+        async with Client(mcp) as client:
+            contents = await client.read_resource("sigma://events/windows")
+            data = json.loads(contents[0].text)
+            assert isinstance(data, list)
+
+    @pytest.mark.anyio
+    async def test_list_windows_events_contains_event_4624(self) -> None:
+        async with Client(mcp) as client:
+            contents = await client.read_resource("sigma://events/windows")
+            data = json.loads(contents[0].text)
+            event_ids = [e["event_id"] for e in data]
+            assert "4624" in event_ids
+
+    @pytest.mark.anyio
+    async def test_list_windows_events_entry_has_required_keys(self) -> None:
+        async with Client(mcp) as client:
+            contents = await client.read_resource("sigma://events/windows")
+            data = json.loads(contents[0].text)
+            assert len(data) > 0
+            for entry in data:
+                for key in (
+                    "event_id",
+                    "title",
+                    "description",
+                    "channel",
+                    "resource_url",
+                ):
+                    assert key in entry, f"Key '{key}' missing from entry {entry}"
+
+    @pytest.mark.anyio
+    async def test_list_windows_events_sorted_by_event_id(self) -> None:
+        async with Client(mcp) as client:
+            contents = await client.read_resource("sigma://events/windows")
+            data = json.loads(contents[0].text)
+            ids = [int(e["event_id"]) for e in data]
+            assert ids == sorted(ids)
+
+    @pytest.mark.anyio
+    async def test_list_windows_events_filters_non_event_files(self) -> None:
+        """Files not matching event-<digits>.md must not appear in the overview."""
+        async with Client(mcp) as client:
+            contents = await client.read_resource("sigma://events/windows")
+            data = json.loads(contents[0].text)
+            names = [e.get("event_id") for e in data]
+            # audit-logon.md is in the fixture but should be absent
+            assert "audit-logon" not in names
+
+    @pytest.mark.anyio
+    async def test_list_windows_events_channel_populated(self) -> None:
+        async with Client(mcp) as client:
+            contents = await client.read_resource("sigma://events/windows")
+            data = json.loads(contents[0].text)
+            entry_4624 = next(e for e in data if e["event_id"] == "4624")
+            assert entry_4624["channel"] == "security"
+
+    @pytest.mark.anyio
+    async def test_list_windows_events_resource_url_format(self) -> None:
+        async with Client(mcp) as client:
+            contents = await client.read_resource("sigma://events/windows")
+            data = json.loads(contents[0].text)
+            entry_4624 = next(e for e in data if e["event_id"] == "4624")
+            assert entry_4624["resource_url"] == "sigma://events/windows/security/4624"
+
+    @pytest.mark.anyio
+    async def test_get_windows_event_returns_markdown(self) -> None:
+        async with Client(mcp) as client:
+            contents = await client.read_resource(
+                "sigma://events/windows/security/4624"
+            )
+            text = contents[0].text
+            assert isinstance(text, str)
+            assert len(text) > 0
+
+    @pytest.mark.anyio
+    async def test_get_windows_event_content_contains_event_id(self) -> None:
+        async with Client(mcp) as client:
+            contents = await client.read_resource(
+                "sigma://events/windows/security/4624"
+            )
+            assert "4624" in contents[0].text
+
+    @pytest.mark.anyio
+    async def test_get_windows_event_uses_shared_cache(self) -> None:
+        """After list_windows_events is called, detail lookups must be cache hits."""
+        # Pre-load the overview (populates cache for individual events)
+        async with Client(mcp) as client:
+            await client.read_resource("sigma://events/windows")
+            # Now fetch a detail — the cache entry was populated by the overview call
+            contents = await client.read_resource(
+                "sigma://events/windows/security/4624"
+            )
+            assert "4624" in contents[0].text
+
+    @pytest.mark.anyio
+    async def test_get_windows_event_channel_ignored_for_lookup(self) -> None:
+        """The channel segment is cosmetic; any value should return the same content."""
+        async with Client(mcp) as client:
+            contents_a = await client.read_resource(
+                "sigma://events/windows/security/4624"
+            )
+            contents_b = await client.read_resource("sigma://events/windows/other/4624")
+            assert contents_a[0].text == contents_b[0].text

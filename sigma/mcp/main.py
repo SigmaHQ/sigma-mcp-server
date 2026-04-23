@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json as _json
 import re
 from typing import Any
 
@@ -36,6 +37,24 @@ _SPEC_URL_RULES = (
 )
 
 _spec_cache: dict[str, str] = {}
+
+# ---------------------------------------------------------------------------
+# Windows IT-Pro event knowledge base URLs
+# ---------------------------------------------------------------------------
+
+_WIN_EVENTS_BASE_URL = (
+    "https://raw.githubusercontent.com/duckxing/windows-itpro-docs/"
+    "refs/heads/master/windows/keep-secure"
+)
+_WIN_EVENTS_INDEX_URL = (
+    "https://api.github.com/repos/duckxing/windows-itpro-docs/"
+    "contents/windows/keep-secure"
+)
+
+# Regex patterns for parsing Windows event Markdown front matter
+_FRONT_MATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
+_FRONT_MATTER_FIELD_RE = re.compile(r"^([\w.-]+)\s*:\s*(.+)$", re.MULTILINE)
+_CHANNEL_RE = re.compile(r"<Channel>([^<]+)</Channel>", re.IGNORECASE)
 
 
 async def _fetch_spec(url: str) -> str:
@@ -191,6 +210,47 @@ def _parse_tags(markdown: str) -> dict[str, str]:
         description = " ".join(prose_lines).strip()
         results[name] = description
     return results
+
+
+def _parse_win_event_front_matter(markdown: str) -> dict[str, str]:
+    """Parse YAML-like front matter from a Windows event description Markdown file.
+
+    Extracts simple ``key: value`` metadata pairs from the YAML front matter
+    block delimited by ``---`` at the start of the file.  Only flat key–value
+    pairs are extracted; nested YAML structures are not supported.
+
+    Args:
+        markdown: Raw Markdown content of a Windows event documentation page.
+
+    Returns:
+        Dict mapping lower-cased key names (e.g. ``"title"``,
+        ``"description"``) to their string values.  Returns an empty dict
+        when no front matter block is present.
+    """
+    meta: dict[str, str] = {}
+    fm_match = _FRONT_MATTER_RE.match(markdown)
+    if not fm_match:
+        return meta
+    for m in _FRONT_MATTER_FIELD_RE.finditer(fm_match.group(1)):
+        meta[m.group(1).strip().lower()] = m.group(2).strip()
+    return meta
+
+
+def _extract_win_event_channel(markdown: str) -> str:
+    """Extract the Windows log channel name from the embedded event XML.
+
+    Searches the Markdown content for a ``<Channel>…</Channel>`` element
+    inside the event XML example and returns its text in lower case.
+
+    Args:
+        markdown: Raw Markdown content of a Windows event documentation page.
+
+    Returns:
+        Lower-cased channel name (e.g. ``"security"``), or an empty string
+        when no ``<Channel>`` element is found.
+    """
+    m = _CHANNEL_RE.search(markdown)
+    return m.group(1).strip().lower() if m else ""
 
 
 # Session state keys
@@ -427,6 +487,89 @@ async def get_specification() -> str:
     field modifiers, before writing or reviewing a rule.
     """
     return await _fetch_spec(_SPEC_URL_RULES)
+
+
+@mcp.resource("sigma://events/windows")
+async def list_windows_events() -> list[dict[str, str]]:
+    """List all documented Windows Security events with their metadata.
+
+    Fetches the GitHub directory listing on the first call, then fetches each
+    event description file and caches all content for the server's lifetime.
+    Each entry in the returned list contains:
+
+    - ``event_id``: numeric Windows event identifier as a string (e.g.
+      ``"4624"``).
+    - ``title``: short human-readable title from the file's front matter.
+    - ``description``: one-sentence description from the file's front matter.
+    - ``channel``: Windows log channel in lower case (e.g. ``"security"``),
+      extracted from the embedded event XML.
+    - ``resource_url``: MCP resource URI for the full event description, e.g.
+      ``"sigma://events/windows/security/4624"``.
+
+    Results are sorted by event ID.  Use this resource to discover which
+    Windows events are documented and to find the right ``service`` field value
+    when writing a Sigma rule that targets Windows log sources.
+    """
+    # Fetch the GitHub API directory listing (1 request, cached as JSON text)
+    raw_listing = await _fetch_spec(_WIN_EVENTS_INDEX_URL)
+    entries_raw: list[Any] = _json.loads(raw_listing)
+
+    # Collect event IDs from event-*.md filenames
+    event_ids: list[str] = []
+    for entry in entries_raw:
+        name: str = entry.get("name", "")
+        m = re.match(r"^event-(\d+)\.md$", name)
+        if m:
+            event_ids.append(m.group(1))
+
+    # Fetch each event file and extract metadata
+    results: list[dict[str, str]] = []
+    for event_id in event_ids:
+        url = f"{_WIN_EVENTS_BASE_URL}/event-{event_id}.md"
+        content = await _fetch_spec(url)
+        meta = _parse_win_event_front_matter(content)
+        channel = _extract_win_event_channel(content)
+        results.append(
+            {
+                "event_id": event_id,
+                "title": meta.get("title", ""),
+                "description": meta.get("description", ""),
+                "channel": channel,
+                "resource_url": (
+                    f"sigma://events/windows/{channel or 'unknown'}/{event_id}"
+                ),
+            }
+        )
+
+    return sorted(results, key=lambda x: int(x["event_id"]))
+
+
+@mcp.resource("sigma://events/windows/{channel}/{event_id}")
+async def get_windows_event(channel: str, event_id: str) -> str:
+    """Return the full documentation for a specific Windows log event.
+
+    Fetches the event description Markdown from the Windows IT Pro
+    documentation repository on first call and caches it for the server's
+    lifetime.  The cached content is shared with ``list_windows_events`` so
+    that calling the overview first makes subsequent detail lookups free.
+
+    Args:
+        channel: Windows log channel (e.g. ``security``, ``system``).
+            Accepted for URI consistency and organisational clarity; the event
+            file is looked up by ``event_id`` alone.
+        event_id: Numeric Windows event identifier (e.g. ``4624``).
+
+    Returns:
+        Full Markdown text describing the event, including the event
+        description, example XML, field meanings, and security monitoring
+        recommendations.
+
+    Raises:
+        httpx.HTTPStatusError: When the event ID does not exist in the
+            upstream repository.
+    """
+    url = f"{_WIN_EVENTS_BASE_URL}/event-{event_id}.md"
+    return await _fetch_spec(url)
 
 
 @mcp.prompt
