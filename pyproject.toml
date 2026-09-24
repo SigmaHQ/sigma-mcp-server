@@ -6,7 +6,7 @@ authors = [
     {name = "Thomas Patzke",email = "thomas@patzke.org"}
 ]
 license = {text = "MIT"}
-requires-python = "^3.10"
+requires-python = ">=3.10"
 dependencies = [
     "fastmcp (>=3.2.4,<4.0.0)",
     "httpx (>=0.27,<1.0.0)",
