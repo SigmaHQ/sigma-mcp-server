@@ -66,10 +66,13 @@ conftest.py       # anyio_backend fixture ("asyncio")
   `description` and `severity` are `ClassVar` on the class, not instance fields.
 
 ### Session State Keys
-- `"validator_names"` – `list[str] | None` – explicit allow-list of validator
-  identifiers, or `None` to use all validators.
-- `"excluded_validators"` – `list[str]` – validator identifiers to exclude
-  after the allow-list is applied.
+- `"validator_config"` – `dict` – the validator configuration, stored as a
+  single value so that it is always read as a consistent pair:
+  - `"validator_names"` – `list[str] | None` – explicit allow-list of validator
+    identifiers, or `None` to use all validators.
+  - `"exclusions"` – `list[str]` – validator identifiers to exclude after the
+    allow-list is applied.
+- FastMCP expires session state 24 hours after it was last written.
 
 ### Resources
 - `sigma://validators` – returns `dict[str, str]` (identifier → docstring).

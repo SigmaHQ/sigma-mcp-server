@@ -424,6 +424,56 @@ class TestConfigureValidators:
             assert "error" in result.data
 
     @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "config",
+        [
+            {"validator_names": []},
+            {
+                "validator_names": ["identifier_existence"],
+                "exclusions": ["identifier_existence"],
+            },
+            {"exclusions": sorted(all_validators)},
+        ],
+    )
+    async def test_config_with_no_active_validator_is_rejected(
+        self, config: dict[str, Any]
+    ) -> None:
+        async with Client(mcp) as client:
+            result = await client.call_tool("configure_validators", config)
+            assert "error" in result.data
+            # nothing was stored: validation still uses the full default set
+            validate_result = await client.call_tool(
+                "validate_rule", {"rule_yaml": RULE_NO_ID}
+            )
+            assert isinstance(validate_result.data, list)
+            validators_hit = {i["validator"] for i in validate_result.data}
+            assert "identifier_existence" in validators_hit
+
+    @pytest.mark.anyio
+    async def test_config_is_stored_with_a_single_state_write(self) -> None:
+        from unittest.mock import AsyncMock
+
+        from fastmcp import Context
+
+        set_state = AsyncMock()
+        with patch.object(Context, "set_state", new=set_state):
+            async with Client(mcp) as client:
+                await client.call_tool(
+                    "configure_validators",
+                    {
+                        "validator_names": ["identifier_existence"],
+                        "exclusions": [],
+                    },
+                )
+        assert set_state.await_count == 1
+        assert set_state.await_args is not None
+        _key, value = set_state.await_args.args
+        assert value == {
+            "validator_names": ["identifier_existence"],
+            "exclusions": [],
+        }
+
+    @pytest.mark.anyio
     async def test_empty_exclusions_list_clears_exclusions(self) -> None:
         async with Client(mcp) as client:
             # First exclude something

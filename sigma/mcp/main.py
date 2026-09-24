@@ -238,9 +238,9 @@ def _parse_win_event_channel(markdown: str) -> str:
     return m.group(1).strip().lower() if m else "security"
 
 
-# Session state keys
-_STATE_VALIDATOR_NAMES = "validator_names"
-_STATE_EXCLUSIONS = "excluded_validators"
+# Session state key.  The allow-list and the exclusions are stored together
+# under one key so that validate_rule always reads a consistent pair.
+_STATE_VALIDATOR_CONFIG = "validator_config"
 
 mcp: FastMCP = FastMCP("sigma-mcp-server")
 
@@ -313,10 +313,10 @@ async def validate_rule(rule_yaml: str, ctx: Context) -> list[dict[str, Any]]:
         ``validator``, ``type``, ``severity``, ``description`` and ``rules``.
         An empty list means no issues were found.
     """
-    validator_names: list[str] | None = await ctx.get_state(_STATE_VALIDATOR_NAMES)
-    raw_exclusions: list[str] | None = await ctx.get_state(_STATE_EXCLUSIONS)
-    exclusions: list[str] = raw_exclusions if raw_exclusions is not None else []
-    active = _get_active_validators(validator_names, exclusions)
+    config: dict[str, Any] | None = await ctx.get_state(_STATE_VALIDATOR_CONFIG)
+    if config is None:
+        config = {"validator_names": None, "exclusions": []}
+    active = _get_active_validators(config["validator_names"], config["exclusions"])
 
     try:
         rule = SigmaRule.from_yaml(rule_yaml)
@@ -350,8 +350,12 @@ async def configure_validators(
 ) -> dict[str, Any]:
     """Configure which pySigma validators are used for rule validation.
 
-    The configuration is stored in the MCP session and persists for all
-    subsequent ``validate_rule`` calls within the same session.
+    The configuration is stored in the MCP session and applies to subsequent
+    ``validate_rule`` calls within the same session.  FastMCP expires session
+    state 24 hours after it was last written; after that the defaults (all
+    validators, no exclusions) apply again until this tool is called again.
+    A configuration that would leave no validator active is rejected, because
+    ``validate_rule`` would then report every rule as having no issues.
 
     Args:
         validator_names: Explicit allow-list of validator identifiers to use.
@@ -363,7 +367,8 @@ async def configure_validators(
 
     Returns:
         Dict with the stored ``validator_names`` and ``exclusions`` values, or
-        an ``error`` key with a description when unknown identifiers are given.
+        an ``error`` key with a description when unknown identifiers are given
+        or no validator would remain active.  Nothing is stored on error.
     """
     if validator_names is not None:
         invalid = [n for n in validator_names if n not in all_validators]
@@ -375,9 +380,18 @@ async def configure_validators(
     if invalid_exc:
         return {"error": f"Unknown validators in exclusions: {invalid_exc}"}
 
-    await ctx.set_state(_STATE_VALIDATOR_NAMES, validator_names)
-    await ctx.set_state(_STATE_EXCLUSIONS, exc_list)
-    return {"validator_names": validator_names, "exclusions": exc_list}
+    if not _get_active_validators(validator_names, exc_list):
+        return {
+            "error": "Configuration leaves no validator active; "
+            "validate_rule would report no issues for every rule."
+        }
+
+    config: dict[str, Any] = {
+        "validator_names": validator_names,
+        "exclusions": exc_list,
+    }
+    await ctx.set_state(_STATE_VALIDATOR_CONFIG, config)
+    return config
 
 
 @mcp.resource("sigma://validators")
