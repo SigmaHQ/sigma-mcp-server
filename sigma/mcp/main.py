@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import importlib.resources
 import json
@@ -51,18 +52,47 @@ _WIN_EVENT_INDEX: dict[str, dict[str, str]] = json.loads(
 )
 
 
+# In-flight downloads keyed by URL; an entry is removed once its download ends
+_inflight_fetches: dict[str, asyncio.Task[str]] = {}
+
+
+async def _download_into(cache: dict[str, str], key: str, url: str) -> str:
+    """Download *url*, store the response text in ``cache[key]`` and return it."""
+    async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+        cache[key] = response.text
+        return response.text
+
+
+async def _fetch_cached(cache: dict[str, str], key: str, url: str) -> str:
+    """Return ``cache[key]``, downloading *url* into it on a cache miss.
+
+    Concurrent callers that miss the cache while a download of *url* is
+    running wait for that download instead of starting another one.  The
+    cache is filled before the download task completes, so a caller always
+    finds either the cached value or the running download.  A failed download
+    is not cached, so a later call retries.
+    """
+    if key in cache:
+        return cache[key]
+    task = _inflight_fetches.get(url)
+    if task is None:
+        task = asyncio.ensure_future(_download_into(cache, key, url))
+        _inflight_fetches[url] = task
+        task.add_done_callback(lambda _: _inflight_fetches.pop(url, None))
+    # shield: a cancelled caller must not cancel the download for the others
+    return await asyncio.shield(task)
+
+
 async def _fetch_spec(url: str) -> str:
     """Fetch *url* and return the response text.
 
     Results are cached in ``_spec_cache`` keyed by URL so that each remote
-    document is fetched at most once per server process lifetime.
+    document is fetched at most once per server process lifetime, also when
+    several requests for it arrive concurrently.
     """
-    if url not in _spec_cache:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            _spec_cache[url] = response.text
-    return _spec_cache[url]
+    return await _fetch_cached(_spec_cache, url, url)
 
 
 # ---------------------------------------------------------------------------
@@ -503,13 +533,8 @@ async def get_windows_event(channel: str, event_id: str) -> str:
     Returns:
         Raw Markdown text of the event documentation page.
     """
-    if event_id not in _win_event_content_cache:
-        url = f"{_WIN_EVENTS_RAW_BASE}event-{event_id}.md"
-        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as http:
-            response = await http.get(url)
-            response.raise_for_status()
-            _win_event_content_cache[event_id] = response.text
-    return _win_event_content_cache[event_id]
+    url = f"{_WIN_EVENTS_RAW_BASE}event-{event_id}.md"
+    return await _fetch_cached(_win_event_content_cache, event_id, url)
 
 
 @mcp.prompt
