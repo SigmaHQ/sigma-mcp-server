@@ -103,7 +103,11 @@ configuration.
 **Returns**
 
 On success: `{"validator_names": ..., "exclusions": [...]}` confirming the stored config.  
-On error: `{"error": "<description>"}` when an unknown identifier is supplied.
+On error: `{"error": "<description>"}` when an unknown identifier is supplied, or
+when the configuration would leave no validator active. Nothing is stored on error.
+
+FastMCP expires session state 24 hours after it was last written; after that the
+default configuration (all validators) applies again.
 
 **Example – exclude a single validator:**
 
