@@ -167,6 +167,9 @@ def _parse_fields(markdown: str) -> dict[str, list[str]]:
             # Derive a slug from the heading: lowercase, spaces → underscore
             slug = re.sub(r"\s+", "_", heading.lower())
             slug = re.sub(r"[^a-z0-9_]", "", slug)
+            # Headings name the events ("Process Creation Events"); the log
+            # source category is the slug without that suffix (process_creation)
+            slug = re.sub(r"_events?$", "", slug)
             results[slug] = sorted(set(fields))
 
     return results
