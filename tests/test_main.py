@@ -461,6 +461,57 @@ class TestConfigureValidators:
             assert "identifier_existence" not in active
 
 
+class TestGenerateUUID:
+    @pytest.mark.anyio
+    async def test_generate_uuid_returns_string(self) -> None:
+        async with Client(mcp) as client:
+            result = await client.call_tool("generate_uuid", {})
+            assert isinstance(result.data, str)
+
+    @pytest.mark.anyio
+    async def test_generate_uuid_format_is_valid(self) -> None:
+        async with Client(mcp) as client:
+            result = await client.call_tool("generate_uuid", {})
+            uuid_str = result.data
+            # UUID format: 8-4-4-4-12 hexadecimal digits separated by hyphens
+            import re
+
+            pattern = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            assert re.match(pattern, uuid_str.lower())
+
+    @pytest.mark.anyio
+    async def test_generate_uuid_returns_unique_values(self) -> None:
+        async with Client(mcp) as client:
+            result1 = await client.call_tool("generate_uuid", {})
+            result2 = await client.call_tool("generate_uuid", {})
+            assert result1.data != result2.data
+
+    @pytest.mark.anyio
+    async def test_generated_uuid_can_be_used_in_sigma_rule(self) -> None:
+        async with Client(mcp) as client:
+            uuid_result = await client.call_tool("generate_uuid", {})
+            generated_uuid = uuid_result.data
+            rule_with_generated_id = f"""\
+title: Test Rule
+id: {generated_uuid}
+status: test
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection:
+        CommandLine|contains: whoami
+    condition: selection
+"""
+            validate_result = await client.call_tool(
+                "validate_rule", {"rule_yaml": rule_with_generated_id}
+            )
+            assert isinstance(validate_result.data, list)
+            # Should not have identifier_existence issue with a valid UUID
+            validators_hit = [i["validator"] for i in validate_result.data]
+            assert "identifier_existence" not in validators_hit
+
+
 class TestResources:
     @pytest.mark.anyio
     async def test_list_validators_resource_returns_dict(self) -> None:
