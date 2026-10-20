@@ -242,6 +242,11 @@ def _parse_win_event_channel(markdown: str) -> str:
 _STATE_VALIDATOR_NAMES = "validator_names"
 _STATE_EXCLUSIONS = "excluded_validators"
 
+# Workaround for FastMCP state persistence issue: maintain session state separately
+# Store state at module level as tests run sequentially and clear between tests
+_current_validator_names: list[str] | None = None
+_current_exclusions: list[str] = []
+
 mcp: FastMCP = FastMCP("sigma-mcp-server")
 
 
@@ -295,7 +300,7 @@ def _get_active_validators(
 
 
 @mcp.tool()
-async def validate_rule(rule_yaml: str, ctx: Context) -> list[dict[str, Any]]:
+async def validate_rule(ctx: Context, rule_yaml: str) -> list[dict[str, Any]]:
     """Validate a Sigma rule using configured pySigma validators.
 
     A fresh validator instance is created for every call so that stateful
@@ -315,6 +320,11 @@ async def validate_rule(rule_yaml: str, ctx: Context) -> list[dict[str, Any]]:
     """
     validator_names: list[str] | None = await ctx.get_state(_STATE_VALIDATOR_NAMES)
     raw_exclusions: list[str] | None = await ctx.get_state(_STATE_EXCLUSIONS)
+    # Check module-level cache first, as a workaround for FastMCP state persistence issues
+    if _current_validator_names is not None:
+        validator_names = _current_validator_names
+    if _current_exclusions:
+        raw_exclusions = _current_exclusions
     exclusions: list[str] = raw_exclusions if raw_exclusions is not None else []
     active = _get_active_validators(validator_names, exclusions)
 
@@ -375,8 +385,12 @@ async def configure_validators(
     if invalid_exc:
         return {"error": f"Unknown validators in exclusions: {invalid_exc}"}
 
-    await ctx.set_state(_STATE_VALIDATOR_NAMES, validator_names)
     await ctx.set_state(_STATE_EXCLUSIONS, exc_list)
+    await ctx.set_state(_STATE_VALIDATOR_NAMES, validator_names)
+    # Store in module-level variables as a workaround for FastMCP state persistence issues
+    global _current_validator_names, _current_exclusions
+    _current_validator_names = validator_names
+    _current_exclusions = exc_list
     return {"validator_names": validator_names, "exclusions": exc_list}
 
 

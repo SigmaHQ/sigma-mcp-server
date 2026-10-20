@@ -8,7 +8,7 @@ authors = [
 license = {text = "MIT"}
 requires-python = "<4.0,>=3.11"
 dependencies = [
-    "fastmcp (>=3.2.4,<4.0.0)",
+    "fastmcp (>=4.1.1,<5.0.0)",
     "httpx (>=0.27,<1.0.0)",
     "pysigma (>=2.0.1,<3.0.0)"
 ]
