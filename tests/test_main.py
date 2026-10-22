@@ -320,6 +320,54 @@ class TestValidateRule:
             assert "SigmaParseError" in types
 
     @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("rule_yaml", "error_type"),
+        [
+            ("title: [unclosed", "ParserError"),
+            ("title: x\n\tfoo: bar", "ScannerError"),
+            ("- a\n- b", "AttributeError"),
+            ("just a string", "AttributeError"),
+        ],
+    )
+    async def test_non_sigma_parse_errors_return_issue_list(
+        self, rule_yaml: str, error_type: str
+    ) -> None:
+        async with Client(mcp) as client:
+            result = await client.call_tool("validate_rule", {"rule_yaml": rule_yaml})
+            assert isinstance(result.data, list)
+            assert len(result.data) == 1
+            issue = result.data[0]
+            assert issue["validator"] == "parser"
+            # SigmaParseError if a future pySigma maps the error itself
+            assert issue["type"] in (error_type, "SigmaParseError")
+            assert issue["severity"] == "high"
+            assert issue["rules"] == []
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("condition", "error_type"),
+        [("'selection or'", "SigmaConditionError"), ("5", "TypeError")],
+    )
+    async def test_validator_exception_returned_as_issue(
+        self, condition: str, error_type: str
+    ) -> None:
+        rule_yaml = RULE_NO_ID.replace(
+            "condition: selection", f"condition: {condition}"
+        )
+        async with Client(mcp) as client:
+            result = await client.call_tool("validate_rule", {"rule_yaml": rule_yaml})
+            assert isinstance(result.data, list)
+            failed = [i for i in result.data if i["type"] == error_type]
+            assert failed
+            for issue in failed:
+                assert issue["validator"] in all_validators
+                assert issue["severity"] == "high"
+                assert issue["rules"] == ["Test Rule"]
+            # the remaining validators still ran
+            validators_hit = {i["validator"] for i in result.data}
+            assert "identifier_existence" in validators_hit
+
+    @pytest.mark.anyio
     async def test_issue_dict_has_required_keys(self) -> None:
         async with Client(mcp) as client:
             result = await client.call_tool("validate_rule", {"rule_yaml": RULE_NO_ID})

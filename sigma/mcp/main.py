@@ -331,24 +331,46 @@ async def validate_rule(ctx: Context, rule_yaml: str) -> list[dict[str, Any]]:
 
     try:
         rule = SigmaRule.from_yaml(rule_yaml)
-    except SigmaError as exc:
+    except Exception as exc:
+        # Not only SigmaError: invalid YAML, a non-mapping document or a
+        # wrongly typed field raise other exceptions from the YAML loader or
+        # from pySigma.  All of them must come back as a documented issue.
         return [
             {
                 "validator": "parser",
-                "type": "SigmaParseError",
+                "type": (
+                    "SigmaParseError"
+                    if isinstance(exc, SigmaError)
+                    else type(exc).__name__
+                ),
                 "severity": "high",
                 "description": str(exc),
                 "rules": [],
             }
         ]
 
+    rule_ref = str(rule.id) if rule.id else str(rule.title)
     issues: list[dict[str, Any]] = []
     for name, validator_cls in active.items():
         v: SigmaRuleValidator = validator_cls()
-        for issue in v.validate(rule):
-            issues.append(_issue_to_dict(name, issue))
-        for issue in v.finalize():
-            issues.append(_issue_to_dict(name, issue))
+        try:
+            for issue in v.validate(rule):
+                issues.append(_issue_to_dict(name, issue))
+            for issue in v.finalize():
+                issues.append(_issue_to_dict(name, issue))
+        except Exception as exc:
+            # A validator that cannot process the rule (e.g. an unparseable
+            # condition) is reported as an issue of that validator; the
+            # remaining validators still run.
+            issues.append(
+                {
+                    "validator": name,
+                    "type": type(exc).__name__,
+                    "severity": "high",
+                    "description": str(exc),
+                    "rules": [rule_ref],
+                }
+            )
 
     return issues
 
