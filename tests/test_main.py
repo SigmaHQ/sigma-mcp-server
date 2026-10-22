@@ -633,7 +633,24 @@ class TestParseFields:
 
     def test_process_creation_fields_present(self) -> None:
         result = _parse_fields(_TAXONOMY_MD)
-        assert any("process_creation" in k for k in result)
+        assert "process_creation" in result
+        assert "Image" in result["process_creation"]
+
+    def test_heading_events_suffix_maps_to_category_slug(self) -> None:
+        # Shaped like the live spec: the heading says "Events", the logsource
+        # category is process_creation, and prose precedes the table.
+        markdown = (
+            "## Fields\n\n### Generic\n\n#### Process Creation Events\n\n"
+            "Process creation events can be defined with the generic log source "
+            "category *process_creation*.\n\n"
+            "```yml\ncategory: process_creation\nproduct: windows\n```\n\n"
+            "| Field Name | Example Value | Comment |\n"
+            "| ---------- | ------------- | ------- |\n"
+            "| CommandLine | whoami | |\n"
+            "| Image | C:\\\\cmd.exe | |\n\n"
+            "#### Other Generic Rule Categories\n\nProse only.\n\n## History\n"
+        )
+        assert _parse_fields(markdown) == {"process_creation": ["CommandLine", "Image"]}
 
     def test_known_fields_included(self) -> None:
         result = _parse_fields(_TAXONOMY_MD)
@@ -722,14 +739,9 @@ class TestNewResources:
     @pytest.mark.anyio
     async def test_fields_for_known_category_returns_list(self) -> None:
         async with Client(mcp) as client:
-            fields_map = _parse_fields(_TAXONOMY_MD)
-            if not fields_map:
-                pytest.skip("No field categories in fixture")
-            category = next(iter(fields_map))
-            contents = await client.read_resource(f"sigma://fields/{category}")
+            contents = await client.read_resource("sigma://fields/process_creation")
             data = json.loads(contents[0].text)
-            assert isinstance(data, list)
-            assert len(data) > 0
+            assert data == ["CommandLine", "Image", "ParentImage", "ProcessId"]
 
     @pytest.mark.anyio
     async def test_fields_for_unknown_category_returns_empty_list(self) -> None:
