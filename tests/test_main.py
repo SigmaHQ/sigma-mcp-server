@@ -320,6 +320,39 @@ class TestValidateRule:
             assert "SigmaParseError" in types
 
     @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "condition",
+        ["selection and not filter", "selection or missing", "selection and and"],
+    )
+    async def test_undefined_detection_in_condition_is_reported(
+        self, condition: str
+    ) -> None:
+        rule_yaml = RULE_WITH_ID.replace(
+            "condition: selection", f"condition: {condition}"
+        )
+        async with Client(mcp) as client:
+            result = await client.call_tool("validate_rule", {"rule_yaml": rule_yaml})
+            assert isinstance(result.data, list)
+            assert len(result.data) == 1
+            issue = result.data[0]
+            assert issue["validator"] == "parser"
+            assert issue["type"] == "SigmaParseError"
+            assert "not defined in detections" in issue["description"]
+
+    @pytest.mark.anyio
+    async def test_condition_referencing_defined_detections_passes(self) -> None:
+        rule_yaml = RULE_WITH_ID.replace(
+            "        CommandLine|contains: whoami\n",
+            "        CommandLine|contains: whoami\n"
+            "    filter:\n"
+            "        User: SYSTEM\n",
+        ).replace("condition: selection", "condition: 1 of sel* and not filter")
+        async with Client(mcp) as client:
+            result = await client.call_tool("validate_rule", {"rule_yaml": rule_yaml})
+            assert isinstance(result.data, list)
+            assert [i for i in result.data if i["validator"] == "parser"] == []
+
+    @pytest.mark.anyio
     async def test_issue_dict_has_required_keys(self) -> None:
         async with Client(mcp) as client:
             result = await client.call_tool("validate_rule", {"rule_yaml": RULE_NO_ID})

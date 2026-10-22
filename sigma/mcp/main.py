@@ -331,6 +331,12 @@ async def validate_rule(ctx: Context, rule_yaml: str) -> list[dict[str, Any]]:
 
     try:
         rule = SigmaRule.from_yaml(rule_yaml)
+        # from_yaml() keeps conditions as unparsed strings and the core
+        # validators only check their syntax.  Parsing with postprocessing
+        # resolves every referenced detection name, so a condition that
+        # names an undefined detection is reported instead of passing.
+        for condition in rule.detection.parsed_condition:
+            condition.parse()
     except SigmaError as exc:
         return [
             {
