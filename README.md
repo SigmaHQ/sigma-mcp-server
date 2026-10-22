@@ -6,12 +6,32 @@ and other MCP clients.
 
 ## Features
 
-| Capability | Details |
+### Tools
+
+| Tool | Description |
 |---|---|
-| **Tool** `validate_rule` | Validate a Sigma rule (YAML) against all configured validators |
-| **Tool** `configure_validators` | Persist a custom validator allow-list / exclusion-list for the current MCP session |
-| **Resource** `sigma://validators` | JSON dict of available validator identifiers → descriptions |
-| **Resource** `sigma://modifiers` | JSON list of available Sigma value modifier names |
+| `validate_rule` | Validate a Sigma rule (YAML) against all configured validators; returns detailed issue reports with severity levels |
+| `configure_validators` | Persist a custom validator allow-list / exclusion-list for the current MCP session |
+
+### Resources
+
+| Resource | Description |
+|---|---|
+| `sigma://validators` | JSON dict mapping validator identifiers → human-readable descriptions |
+| `sigma://modifiers` | JSON dict mapping modifier names (e.g. `contains`, `re`, `base64`) → descriptions |
+| `sigma://logsources` | JSON array of valid Sigma log source combinations from the official specification |
+| `sigma://fields/{category}` | JSON array of known field names for a Sigma log source category (e.g. `process_creation`) |
+| `sigma://tags` | JSON dict mapping tag namespaces (e.g. `attack`, `cve`, `detection`) → descriptions |
+| `sigma://specification` | Full Sigma Rules Specification document as Markdown |
+| `sigma://events/windows` | JSON dict of documented Windows Security Auditing events grouped by log channel |
+| `sigma://events/windows/{channel}/{event_id}` | Full Microsoft documentation for a specific Windows event as Markdown |
+
+### Prompts
+
+| Prompt | Description |
+|---|---|
+| `create_sigma_rule_from_description` | Guide an LLM to create and validate a Sigma detection rule from a natural language description |
+| `create_sigma_rules_from_url` | Guide an LLM to extract and validate Sigma rules from a blog post or threat report URL |
 
 ## Requirements
 
