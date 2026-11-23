@@ -24,11 +24,14 @@ sigma/mcp/
     repo.py                # download + extract the SigmaHQ rules (GitHub ZIP)
     index.py               # rule index: search entries, logsource statistics, JSON
     index_manager.py       # background refresh, states, inter-process file lock
+    pipelines.py           # parse (safe policy), validate, apply + render pipelines
+    coverage.py            # pipeline coverage via probe rules per logsource/field
     resources.py           # @mcp.resource handlers
     prompts.py             # @mcp.prompt handlers
     tools/
         rules.py           # @mcp.tool handlers for Sigma rules + session state
         index.py           # @mcp.tool handlers for search and statistics
+        pipelines.py       # @mcp.tool handlers for processing pipelines
     knowledge/
         specification.py   # fetch + parse the Sigma specification documents
         windows_events.py  # Windows event index + on-demand event docs
@@ -39,6 +42,7 @@ tests/
     test_main.py  # validation, specification, Windows event and prompt tests
     test_config.py, test_repo.py, test_index.py, test_index_manager.py
     test_index_tools.py  # index tools end-to-end through Client(mcp)
+    test_pipelines.py, test_coverage.py, test_pipeline_tools.py
     data/sigma-repo/ # miniature SigmaHQ repository used by the index tests
 conftest.py       # fixtures: anyio backend, isolated index data dir, fake downloader
 ```
@@ -75,6 +79,13 @@ conftest.py       # fixtures: anyio backend, isolated index data dir, fake downl
 - Tools must never block on long-running work.  The SigmaHQ rule index is
   built in a background thread by `index_manager`; tools return its
   `index_status` plus a `message` while no index is available.
+- Pipelines from clients are untrusted.  Always parse them with
+  `sigma.mcp.pipelines.parse_pipeline`, which applies `PIPELINE_POLICY`
+  (pySigma's `SafePolicy`) and refuses template `vars` files.  Never call
+  `ProcessingPipeline.from_yaml` / `from_dict` on client input directly.
+- Do not report transformed rules with `SigmaRule.to_dict()`: after field
+  mappings to several fields it prints an OR as an AND.  Use
+  `render_detection` instead.
 - The `isolated_index` autouse fixture gives each test its own
   `SIGMA_MCP_DATA_DIR` and sets `SIGMA_MCP_NO_WARMUP=1`, because connecting a
   `Client(mcp)` runs the server lifespan.  Tests must never download from the

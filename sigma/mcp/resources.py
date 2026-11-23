@@ -18,6 +18,7 @@ from sigma.mcp.knowledge.specification import (
 )
 from sigma.mcp.knowledge.windows_events import WIN_EVENT_INDEX, fetch_windows_event
 from sigma.mcp.index_manager import index_manager
+from sigma.mcp.pipelines import pipeline_catalog
 from sigma.mcp.server import mcp
 from sigma.mcp.validation import all_validators
 
@@ -181,3 +182,19 @@ def get_logsource_statistics_resource() -> dict[str, Any]:
             for key, stats in index.logsources.items()
         },
     }
+
+
+@mcp.resource("sigma://pipelines/transformations")
+def list_pipeline_building_blocks() -> dict[str, dict[str, str]]:
+    """All building blocks of Sigma processing pipelines, with descriptions.
+
+    Returns a dict with the sections ``transformations``,
+    ``rule_conditions``, ``detection_item_conditions``,
+    ``field_name_conditions``, ``postprocessing`` and ``finalizers``.  Each
+    maps the identifier used as ``type:`` in pipeline YAML (e.g.
+    ``field_name_mapping``, ``logsource``, ``include_fields``) to the first
+    paragraph of its pySigma documentation.  Generated from the installed
+    pySigma version, so it always matches what ``validate_pipeline``
+    accepts.
+    """
+    return pipeline_catalog()

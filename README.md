@@ -18,6 +18,9 @@ and other MCP clients.
 | `get_logsource_statistics` | Show how many SigmaHQ rules use each logsource and which fields they use most |
 | `update_sigma_repository` | Download the latest SigmaHQ rules and rebuild the rule index in the background |
 | `get_index_status` | Report the state of the SigmaHQ rule index |
+| `validate_pipeline` | Validate a processing pipeline (YAML); returns errors, style warnings and a summary of its transformations |
+| `apply_pipeline` | Apply one or more processing pipelines to a rule and show the result: field mappings, failures, state and the transformed detections |
+| `analyze_pipeline_coverage` | Measure which SigmaHQ logsources and fields a processing pipeline supports, maps, rejects or leaves untouched |
 
 ### Resources
 
@@ -32,6 +35,7 @@ and other MCP clients.
 | `sigma://events/windows` | JSON dict of documented Windows Security Auditing events grouped by log channel |
 | `sigma://events/windows/{channel}/{event_id}` | Full Microsoft documentation for a specific Windows event as Markdown |
 | `sigma://statistics/logsources` | JSON statistics of all logsources in the SigmaHQ rules: rule counts and field usage |
+| `sigma://pipelines/transformations` | All processing pipeline transformations, conditions, postprocessing steps and finalizers with descriptions |
 
 ### Prompts
 
@@ -104,6 +108,21 @@ directory; a lock file makes sure only one of them downloads at a time.
 | `SIGMA_MCP_NO_WARMUP` | unset | Set to `1` to skip loading/building the index at startup; a saved index is then loaded on first use, and `update_sigma_repository` builds one on demand |
 
 The first download needs access to `codeload.github.com`.
+
+### Processing pipelines
+
+`validate_pipeline`, `apply_pipeline` and `analyze_pipeline_coverage` parse
+pipelines with pySigma's safe policy: regular expressions use RE2, template
+directories and external sources are refused.  Template `vars` files, which
+make pySigma execute Python code, are always refused, even when
+`PYSIGMA_ALLOW_VARS_EXECUTION` is set.
+
+`analyze_pipeline_coverage` runs the pipeline with pySigma on probe rules for
+every logsource in the SigmaHQ rule index, and for every field used by at
+least 5 % of that logsource's rules.  It reports logsources as `covered`,
+`uncovered` or `unsupported` (rejected by a `rule_failure`) and fields as
+`mapped`, `unmapped`, `unsupported` (rejected by a `detection_item_failure`)
+or `dropped`.
 
 ---
 
