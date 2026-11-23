@@ -16,8 +16,19 @@ pySigma `sigma` namespace package).  The entry-point for running the server is
 
 ```
 sigma/mcp/
-    __init__.py   # empty namespace marker
-    main.py       # FastMCP server definition, tools, resources, main()
+    __init__.py            # empty namespace marker
+    server.py              # the shared FastMCP instance `mcp`
+    main.py                # imports all component modules (registration), main()
+    validation.py          # pure validator helpers (registry, issue → dict)
+    resources.py           # @mcp.resource handlers
+    prompts.py             # @mcp.prompt handlers
+    tools/
+        rules.py           # @mcp.tool handlers for Sigma rules + session state
+    knowledge/
+        specification.py   # fetch + parse the Sigma specification documents
+        windows_events.py  # Windows event index + on-demand event docs
+    data/
+        windows_event_index.json
 tests/
     __init__.py
     test_main.py  # pytest tests (anyio async tests via the anyio pytest plugin)
@@ -45,8 +56,14 @@ conftest.py       # anyio_backend fixture ("asyncio")
   Run: `poetry run pytest --cov=sigma/mcp --cov-report=term-missing`
 
 ### MCP Server (FastMCP)
-- The `FastMCP` instance is `mcp` (module-level) in `sigma/mcp/main.py`.
-- Tools are registered with `@mcp.tool()`, resources with `@mcp.resource(uri)`.
+- The `FastMCP` instance is `mcp`, defined in `sigma/mcp/server.py` and
+  re-exported by `sigma/mcp/main.py`.
+- Component modules import `mcp` from `sigma.mcp.server` and register tools
+  with `@mcp.tool()`, resources with `@mcp.resource(uri)` and prompts with
+  `@mcp.prompt`.  A new component module must be imported in `main.py`,
+  otherwise its components are never registered.
+- Keep domain logic (fetching, parsing, validation) in plain functions outside
+  the decorated handlers, so it can be unit-tested without an MCP client.
 - The `Context` parameter (type-annotated as `Context`) is injected by FastMCP
   and must **not** be passed by callers.
 - Session state is persisted via `await ctx.set_state(key, value)` /

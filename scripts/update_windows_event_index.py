@@ -33,7 +33,10 @@ from pathlib import Path
 
 import httpx
 
-from sigma.mcp.main import _parse_win_event_channel, _parse_win_event_title
+from sigma.mcp.knowledge.windows_events import (
+    parse_win_event_channel,
+    parse_win_event_title,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -120,8 +123,8 @@ async def main() -> None:
     # 3. Build index: channel -> {event_id -> title}
     index: dict[str, dict[str, str]] = {}
     for event_id, markdown in results.items():
-        title = _parse_win_event_title(markdown)
-        channel = _parse_win_event_channel(markdown)
+        title = parse_win_event_title(markdown)
+        channel = parse_win_event_channel(markdown)
         index.setdefault(channel, {})[event_id] = title
 
     # Sort channels alphabetically; sort event IDs numerically within each channel
