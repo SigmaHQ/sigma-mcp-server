@@ -20,7 +20,8 @@ sigma/mcp/
     server.py              # the shared FastMCP instance `mcp`
     main.py                # imports all component modules (registration), main()
     config.py              # settings from environment variables (data dir, warm-up)
-    validation.py          # pure validator helpers (registry, issue → dict)
+    validation.py          # parse rule collections, run validators, issue → dict
+    naming.py              # SigmaHQ file name conventions (logsource prefixes)
     repo.py                # download + extract the SigmaHQ rules (GitHub ZIP)
     index.py               # rule index: search entries, logsource statistics, JSON
     index_manager.py       # background refresh, states, inter-process file lock
@@ -35,6 +36,8 @@ sigma/mcp/
     knowledge/
         specification.py   # fetch + parse the Sigma specification documents
         windows_events.py  # Windows event index + on-demand event docs
+        logsources.py      # curated logsource knowledge (fields, event IDs, tips)
+        correlation.py     # offline correlation rules reference (fallback)
     data/
         windows_event_index.json
 tests/
@@ -43,6 +46,7 @@ tests/
     test_config.py, test_repo.py, test_index.py, test_index_manager.py
     test_index_tools.py  # index tools end-to-end through Client(mcp)
     test_pipelines.py, test_coverage.py, test_pipeline_tools.py
+    test_rule_tools.py   # collections, logsource info, file names, correlation spec
     data/sigma-repo/ # miniature SigmaHQ repository used by the index tests
 conftest.py       # fixtures: anyio backend, isolated index data dir, fake downloader
 ```
@@ -101,9 +105,13 @@ conftest.py       # fixtures: anyio backend, isolated index data dir, fake downl
   (a `dict[str, type[SigmaRuleValidator]]`).  Identifiers follow the pattern
   `snake_case` derived from the class name (e.g. `IdentifierExistenceValidator`
   → `identifier_existence`).
-- A **fresh validator instance** must be created for each `validate_rule` call.
-- `SigmaRule.from_yaml(yaml_str)` parses a rule; it raises `sigma.exceptions.SigmaError`
-  on parse failure.
+- A **fresh validator instance** must be created for each `validate_rule` call;
+  within a call one instance checks all rules, then `finalize()` runs once.
+- Rules are parsed with `SigmaCollection.from_yaml(..., collect_errors=True)`
+  (see `validation.parse_rules`).  Unresolvable correlation references raise
+  `SigmaRuleNotFoundError` even then; they are reported and the YAML is parsed
+  again with `resolve_references=False`.  Parse issues keep
+  `type: "SigmaParseError"` for compatibility.
 - `SigmaValidationIssue` is the base dataclass for all issues.  Concrete
   subclasses may add extra instance fields (accessible via `dataclasses.fields`).
   `description` and `severity` are `ClassVar` on the class, not instance fields.
