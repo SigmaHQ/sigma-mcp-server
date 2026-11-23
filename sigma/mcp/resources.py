@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from sigma.modifiers import modifier_mapping
 
@@ -16,6 +17,7 @@ from sigma.mcp.knowledge.specification import (
     parse_tags,
 )
 from sigma.mcp.knowledge.windows_events import WIN_EVENT_INDEX, fetch_windows_event
+from sigma.mcp.index_manager import index_manager
 from sigma.mcp.server import mcp
 from sigma.mcp.validation import all_validators
 
@@ -144,3 +146,38 @@ async def get_windows_event(channel: str, event_id: str) -> str:
         Raw Markdown text of the event documentation page.
     """
     return await fetch_windows_event(event_id)
+
+
+@mcp.resource("sigma://statistics/logsources")
+def get_logsource_statistics_resource() -> dict[str, Any]:
+    """Full logsource statistics of the SigmaHQ rule repository.
+
+    Returns a dict with ``index_status``, ``generated_at``, ``source_commit``,
+    ``total_rules`` and ``logsources``, which maps each logsource key
+    (``product/category/service``) to its ``product``, ``category``,
+    ``service``, ``rule_count`` and ``fields`` (field name → number of rules
+    using it).  While the rule index is not available, the dict holds
+    ``index_status`` and a ``message`` instead.
+    """
+    index = index_manager.get_index()
+    if index is None:
+        return {
+            "index_status": index_manager.status.value,
+            "message": index_manager.unavailable_message(),
+        }
+    return {
+        "index_status": index_manager.status.value,
+        "generated_at": index.generated_at.isoformat(),
+        "source_commit": index.source_commit,
+        "total_rules": index.rules_with_logsource,
+        "logsources": {
+            key: {
+                "product": stats.product,
+                "category": stats.category,
+                "service": stats.service,
+                "rule_count": stats.rule_count,
+                "fields": dict(stats.top_fields()),
+            }
+            for key, stats in index.logsources.items()
+        },
+    }

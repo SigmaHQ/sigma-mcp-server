@@ -1,0 +1,13 @@
+title: Suspicious Shell Keywords
+id: 7f6e5d4c-3b2a-4190-8f7e-6d5c4b3a2905
+status: test
+description: Keyword detection without any field names.
+author: Example Author
+date: 2024-01-04
+logsource:
+    product: linux
+detection:
+    keywords:
+        - 'nc -e /bin/sh'
+    condition: keywords
+level: low

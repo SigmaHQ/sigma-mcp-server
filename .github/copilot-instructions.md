@@ -19,11 +19,16 @@ sigma/mcp/
     __init__.py            # empty namespace marker
     server.py              # the shared FastMCP instance `mcp`
     main.py                # imports all component modules (registration), main()
+    config.py              # settings from environment variables (data dir, warm-up)
     validation.py          # pure validator helpers (registry, issue → dict)
+    repo.py                # download + extract the SigmaHQ rules (GitHub ZIP)
+    index.py               # rule index: search entries, logsource statistics, JSON
+    index_manager.py       # background refresh, states, inter-process file lock
     resources.py           # @mcp.resource handlers
     prompts.py             # @mcp.prompt handlers
     tools/
         rules.py           # @mcp.tool handlers for Sigma rules + session state
+        index.py           # @mcp.tool handlers for search and statistics
     knowledge/
         specification.py   # fetch + parse the Sigma specification documents
         windows_events.py  # Windows event index + on-demand event docs
@@ -31,8 +36,11 @@ sigma/mcp/
         windows_event_index.json
 tests/
     __init__.py
-    test_main.py  # pytest tests (anyio async tests via the anyio pytest plugin)
-conftest.py       # anyio_backend fixture ("asyncio")
+    test_main.py  # validation, specification, Windows event and prompt tests
+    test_config.py, test_repo.py, test_index.py, test_index_manager.py
+    test_index_tools.py  # index tools end-to-end through Client(mcp)
+    data/sigma-repo/ # miniature SigmaHQ repository used by the index tests
+conftest.py       # fixtures: anyio backend, isolated index data dir, fake downloader
 ```
 
 ---
@@ -64,6 +72,13 @@ conftest.py       # anyio_backend fixture ("asyncio")
   otherwise its components are never registered.
 - Keep domain logic (fetching, parsing, validation) in plain functions outside
   the decorated handlers, so it can be unit-tested without an MCP client.
+- Tools must never block on long-running work.  The SigmaHQ rule index is
+  built in a background thread by `index_manager`; tools return its
+  `index_status` plus a `message` while no index is available.
+- The `isolated_index` autouse fixture gives each test its own
+  `SIGMA_MCP_DATA_DIR` and sets `SIGMA_MCP_NO_WARMUP=1`, because connecting a
+  `Client(mcp)` runs the server lifespan.  Tests must never download from the
+  network; use the `fake_downloader` fixture or `httpx.MockTransport`.
 - The `Context` parameter (type-annotated as `Context`) is injected by FastMCP
   and must **not** be passed by callers.
 - Session state is persisted via `await ctx.set_state(key, value)` /
@@ -120,7 +135,7 @@ To add a new **tool**:
 3. If session state is needed, add a `ctx: Context` parameter (injected by
    FastMCP; must come before any parameters with defaults to satisfy Python
    syntax rules).
-4. Add tests in `tests/test_main.py` using `async with Client(mcp) as client:`.
+4. Add tests in the matching `tests/test_*.py` file using `async with Client(mcp) as client:`.
 
 To add a new **resource**:
 1. Define a (sync or async) function returning `str`, `bytes`, `dict`, or `list`.

@@ -9,6 +9,7 @@ from __future__ import annotations
 # Imported for their side effect of registering components on ``mcp``.
 import sigma.mcp.prompts  # noqa: F401
 import sigma.mcp.resources  # noqa: F401
+import sigma.mcp.tools.index  # noqa: F401
 import sigma.mcp.tools.rules  # noqa: F401
 from sigma.mcp.server import mcp
 

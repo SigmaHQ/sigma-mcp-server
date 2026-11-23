@@ -1,0 +1,25 @@
+title: Failed Logon
+id: 1f2e3d4c-5b6a-4798-8a7b-6c5d4e3f2a07
+name: failed_logon
+status: test
+logsource:
+    product: windows
+    service: security
+detection:
+    selection:
+        EventID: 4625
+    condition: selection
+---
+title: Multiple Failed Logons From Same Source
+id: 2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c08
+status: test
+correlation:
+    type: event_count
+    rules:
+        - failed_logon
+    group-by:
+        - IpAddress
+    timespan: 10m
+    condition:
+        gte: 10
+level: medium

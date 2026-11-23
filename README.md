@@ -12,6 +12,12 @@ and other MCP clients.
 |---|---|
 | `validate_rule` | Validate a Sigma rule (YAML) against all configured validators; returns detailed issue reports with severity levels |
 | `configure_validators` | Persist a custom validator allow-list / exclusion-list for the current MCP session |
+| `generate_uuid` | Generate a UUID v4 for a rule's `id` field |
+| `search_rules` | Search the SigmaHQ rule repository for rules similar to a detection idea |
+| `get_rule` | Return the full YAML of a SigmaHQ rule by ID or path |
+| `get_logsource_statistics` | Show how many SigmaHQ rules use each logsource and which fields they use most |
+| `update_sigma_repository` | Download the latest SigmaHQ rules and rebuild the rule index in the background |
+| `get_index_status` | Report the state of the SigmaHQ rule index |
 
 ### Resources
 
@@ -25,6 +31,7 @@ and other MCP clients.
 | `sigma://specification` | Full Sigma Rules Specification document as Markdown |
 | `sigma://events/windows` | JSON dict of documented Windows Security Auditing events grouped by log channel |
 | `sigma://events/windows/{channel}/{event_id}` | Full Microsoft documentation for a specific Windows event as Markdown |
+| `sigma://statistics/logsources` | JSON statistics of all logsources in the SigmaHQ rules: rule counts and field usage |
 
 ### Prompts
 
@@ -74,6 +81,29 @@ Add the following entry to your MCP client configuration (e.g.
 ```
 
 Adjust the `command` path to the installed binary if it is not on `PATH`.
+
+### SigmaHQ rule index
+
+`search_rules`, `get_rule`, `get_logsource_statistics` and
+`sigma://statistics/logsources` work on a local index of the
+[SigmaHQ rule repository](https://github.com/SigmaHQ/sigma).
+
+When the server starts, it loads the index saved by an earlier run.  If
+there is none, or it is older than the maximum age, the server downloads the
+rules from GitHub (all `rules*` directories) and rebuilds the index **in the
+background**.  The server answers requests at once: until the index is ready,
+the index tools return an `index_status` and a `message` instead of results,
+and `get_index_status` shows the progress.  While an update runs, the
+previous index stays in use.  Several server processes share the data
+directory; a lock file makes sure only one of them downloads at a time.
+
+| Environment variable | Default | Description |
+|---|---|---|
+| `SIGMA_MCP_DATA_DIR` | user cache dir (`~/.cache/sigma-mcp-server`, `~/Library/Caches/sigma-mcp-server`, `%LOCALAPPDATA%\sigma-mcp-server`) | Where the downloaded rules (`sigma-rules/`) and the index (`index.json`) are stored |
+| `SIGMA_MCP_INDEX_MAX_AGE_DAYS` | `7` | Rebuild the index at startup when it is older than this; `0` disables automatic updates |
+| `SIGMA_MCP_NO_WARMUP` | unset | Set to `1` to skip loading/building the index at startup; a saved index is then loaded on first use, and `update_sigma_repository` builds one on demand |
+
+The first download needs access to `codeload.github.com`.
 
 ---
 
