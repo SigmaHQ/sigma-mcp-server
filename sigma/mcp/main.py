@@ -19,7 +19,7 @@ import sigma.mcp.tools.pipelines  # noqa: F401
 import sigma.mcp.tools.rules  # noqa: F401
 from sigma.mcp import config
 from sigma.mcp.index_manager import IndexStatus, index_manager
-from sigma.mcp.public import apply_public_mode
+from sigma.mcp.public import STATELESS_HTTP, apply_public_mode
 from sigma.mcp.reference_data import reference_data
 from sigma.mcp.server import mcp
 
@@ -116,6 +116,9 @@ def main(argv: Sequence[str] | None = None) -> None:
             host=args.host,
             port=args.port,
             show_banner=False,
+            # Public servers run without sessions (see sigma.mcp.public);
+            # None keeps FastMCP's default otherwise.
+            stateless_http=STATELESS_HTTP if args.public else None,
             # Behind a reverse proxy, take the client address from
             # X-Forwarded-For (for the proxies in FORWARDED_ALLOW_IPS).
             uvicorn_config={

@@ -205,6 +205,12 @@ https://<host>/mcp` or as a custom connector in claude.ai.
   second, with bursts of twice as many.
 - At most `SIGMA_MCP_MAX_CONCURRENT_TOOLS` tool calls run at once; further
   calls wait up to 30 seconds for a slot, then fail with "server busy".
+- HTTP is served without MCP sessions (stateless Streamable HTTP).  With
+  sessions, every `initialize` request occupies a session slot before the
+  rate limit applies, so one client could fill all slots and lock everyone
+  else out.  `configure_validators` therefore does not persist on a public
+  server; clients pass `validator_names` and `exclusions` to
+  `validate_rule`.
 
 | Environment variable | Default | Description |
 |---|---|---|
@@ -313,7 +319,8 @@ An **empty array** means the rule passed all active validators.
 Persist a custom validator configuration for the current MCP session.
 All subsequent `validate_rule` calls within the same session will use this
 configuration.  Over HTTP, clients without an MCP session (protocol
-2026-07-28) cannot keep it between calls, and the configuration never
+2026-07-28, and every client of a server in public mode, which runs without
+sessions) cannot keep it between calls, and the configuration never
 affects other clients; pass `validator_names` and `exclusions` to
 `validate_rule` instead.
 

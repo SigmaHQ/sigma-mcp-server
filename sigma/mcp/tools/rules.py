@@ -180,8 +180,9 @@ async def configure_validators(
     else:
         result["note"] = (
             "On this shared HTTP server the configuration only persists for "
-            "clients with an MCP session. To be sure, pass validator_names "
-            "and exclusions to validate_rule directly."
+            "clients with an MCP session, and public servers run without "
+            "sessions. To be sure, pass validator_names and exclusions to "
+            "validate_rule directly."
         )
     return result
 

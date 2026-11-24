@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import anyio
+import fastmcp
 import pytest
 from fastmcp import FastMCP
 from fastmcp.client import Client
@@ -129,6 +130,7 @@ class TestCommandLine:
         assert kwargs["host"] == "0.0.0.0"
         assert kwargs["port"] == 9123
         assert kwargs["uvicorn_config"]["proxy_headers"] is True
+        assert kwargs["stateless_http"] is None
 
     def test_main_public_applies_hardening(self) -> None:
         with (
@@ -137,6 +139,14 @@ class TestCommandLine:
         ):
             main(["--public"])
         mock_public.assert_called_once_with(mcp)
+
+    def test_main_public_http_is_stateless(self) -> None:
+        with (
+            patch.object(mcp, "run") as mock_run,
+            patch("sigma.mcp.main.apply_public_mode"),
+        ):
+            main(["--transport", "http", "--public"])
+        assert mock_run.call_args.kwargs["stateless_http"] is True
 
     def test_main_prepare_exits(self) -> None:
         with (
@@ -229,6 +239,53 @@ def _server(*middleware: Any) -> FastMCP:
     for item in middleware:
         server.add_middleware(item)
     return server
+
+
+@pytest.fixture(autouse=True)
+def restore_stateless_setting() -> Iterator[None]:
+    """apply_public_mode() changes a global FastMCP setting; undo it."""
+    original = fastmcp.settings.stateless_http
+    yield
+    fastmcp.settings.stateless_http = original
+
+
+_INITIALIZE = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {"name": "test", "version": "0"},
+    },
+}
+_HEADERS = {"Accept": "application/json, text/event-stream"}
+
+
+class TestStatelessHttp:
+    def test_public_mode_serves_http_without_sessions(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Rejected initialize requests must not pile up as sessions."""
+        monkeypatch.setenv(config.ENV_RATE_LIMIT, "1")
+        server = _server()
+        apply_public_mode(server)
+        assert fastmcp.settings.stateless_http is True
+        app = server.http_app()
+        with TestClient(app) as client:
+            replies = [
+                client.post("/mcp", json=_INITIALIZE, headers=_HEADERS)
+                for _ in range(20)
+            ]
+            assert all(r.status_code == 200 for r in replies)
+            assert any("Rate limit" in r.text for r in replies)
+            assert not any("mcp-session-id" in r.headers for r in replies)
+
+    def test_without_public_mode_sessions_are_kept(self) -> None:
+        app = _server().http_app()
+        with TestClient(app) as client:
+            reply = client.post("/mcp", json=_INITIALIZE, headers=_HEADERS)
+            assert "mcp-session-id" in reply.headers
 
 
 class TestPublicMode:
