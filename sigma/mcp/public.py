@@ -9,7 +9,8 @@
 * limits the requests per second and client (``SIGMA_MCP_RATE_LIMIT``), and
 * runs at most ``SIGMA_MCP_MAX_CONCURRENT_TOOLS`` tool calls at once, so a
   few expensive calls (e.g. ``analyze_pipeline_coverage``) cannot occupy
-  every worker thread.
+  every worker thread, and
+* serves Streamable HTTP without sessions (:data:`STATELESS_HTTP`).
 
 The server keeps no secrets and only fetches fixed URLs, so it needs no
 authentication.
@@ -23,6 +24,7 @@ import weakref
 from typing import Any
 
 import anyio
+import fastmcp
 import mcp.types as mt
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
@@ -38,6 +40,17 @@ log = logging.getLogger(__name__)
 PRIVATE_TOOLS = ("update_sigma_repository",)
 """Tools removed in public mode.  The rule index is built when the image is
 built and refreshed by deploying a new image."""
+
+STATELESS_HTTP = True
+"""Serve HTTP without MCP sessions in public mode.
+
+With sessions, the MCP SDK opens a session for every ``initialize`` request
+before any middleware runs, so requests the rate limit rejects still occupy
+one of the SDK's 10 000 session slots for its 30-minute idle timeout.  A
+single client could fill all slots within seconds and lock every new client
+out (HTTP 503).  Stateless, each request gets a short-lived transport that
+is released when the request ends.  The server needs no sessions: clients
+pass the validator configuration to ``validate_rule`` with every call."""
 
 QUEUE_TIMEOUT = 30.0
 """Seconds a tool call waits for a free slot before it is rejected."""
@@ -123,6 +136,9 @@ def apply_public_mode(server: FastMCP) -> None:
     if server in _hardened:
         return
     _hardened.add(server)
+    # Hosting platforms that import ``mcp`` build the HTTP app themselves;
+    # FastMCP reads this setting when it does.  main() also passes it to run().
+    fastmcp.settings.stateless_http = STATELESS_HTTP
     for name in PRIVATE_TOOLS:
         try:
             server.local_provider.remove_tool(name)
