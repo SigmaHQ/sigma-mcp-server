@@ -5,9 +5,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import httpx
+
 from sigma.modifiers import modifier_mapping
 
+from sigma.mcp.knowledge.correlation import CORRELATION_RULES_SPEC
 from sigma.mcp.knowledge.specification import (
+    SPEC_URL_CORRELATION,
     SPEC_URL_RULES,
     SPEC_URL_TAGS,
     SPEC_URL_TAXONOMY,
@@ -113,6 +117,23 @@ async def get_specification() -> str:
     field modifiers, before writing or reviewing a rule.
     """
     return await fetch_spec(SPEC_URL_RULES)
+
+
+@mcp.resource("sigma://specification/correlation")
+async def get_correlation_specification() -> str:
+    """Return the Sigma correlation rules specification as Markdown.
+
+    Read this before writing a correlation rule (``event_count``,
+    ``value_count``, ``temporal``, ``temporal_ordered``, ``value_sum``,
+    ``value_avg``, ``value_percentile``).  Fetched from the official
+    sigma-specification repository on first use and cached; when it cannot
+    be fetched, a condensed offline reference with syntax, examples and
+    common mistakes is returned instead.
+    """
+    try:
+        return await fetch_spec(SPEC_URL_CORRELATION)
+    except httpx.HTTPError:
+        return CORRELATION_RULES_SPEC
 
 
 @mcp.resource("sigma://events/windows")

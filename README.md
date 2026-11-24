@@ -10,9 +10,11 @@ and other MCP clients.
 
 | Tool | Description |
 |---|---|
-| `validate_rule` | Validate a Sigma rule (YAML) against all configured validators; returns detailed issue reports with severity levels |
+| `validate_rule` | Validate Sigma rules (YAML, several documents and correlation rules allowed) against all configured validators; returns detailed issue reports with severity levels |
 | `configure_validators` | Persist a custom validator allow-list / exclusion-list for the current MCP session |
 | `generate_uuid` | Generate a UUID v4 for a rule's `id` field |
+| `get_logsource_info` | Suggest logsources for an activity, with fields, event IDs, tips and how SigmaHQ rules use them |
+| `suggest_rule_filename` | Suggest a file name following the SigmaHQ conventions (logsource prefix, length, characters) and check it against existing SigmaHQ rules |
 | `search_rules` | Search the SigmaHQ rule repository for rules similar to a detection idea |
 | `get_rule` | Return the full YAML of a SigmaHQ rule by ID or path |
 | `get_logsource_statistics` | Show how many SigmaHQ rules use each logsource and which fields they use most |
@@ -32,6 +34,7 @@ and other MCP clients.
 | `sigma://fields/{category}` | JSON array of known field names for a Sigma log source category (e.g. `process_creation`) |
 | `sigma://tags` | JSON dict mapping tag namespaces (e.g. `attack`, `cve`, `detection`) → descriptions |
 | `sigma://specification` | Full Sigma Rules Specification document as Markdown |
+| `sigma://specification/correlation` | Sigma Correlation Rules Specification as Markdown (offline reference if it cannot be fetched) |
 | `sigma://events/windows` | JSON dict of documented Windows Security Auditing events grouped by log channel |
 | `sigma://events/windows/{channel}/{event_id}` | Full Microsoft documentation for a specific Windows event as Markdown |
 | `sigma://statistics/logsources` | JSON statistics of all logsources in the SigmaHQ rules: rule counts and field usage |
@@ -130,13 +133,15 @@ or `dropped`.
 
 ### `validate_rule`
 
-Validate a single Sigma rule.
+Validate one or more Sigma rules.  Several rules go into one YAML string,
+separated by `---`; a correlation rule should be accompanied by the rules it
+references.
 
 **Arguments**
 
 | Name | Type | Description |
 |---|---|---|
-| `rule_yaml` | `string` | Complete Sigma rule in YAML format |
+| `rule_yaml` | `string` | Complete Sigma rule(s) in YAML format |
 
 **Returns**
 
@@ -151,6 +156,10 @@ A JSON array of validation issue objects.  Each object contains:
 | `rules` | `array[string]` | Rule IDs / titles affected by the issue |
 
 Additional subclass-specific fields (e.g. `identifier`) may also be present.
+
+Rules that cannot be parsed are reported with `validator: "parser"`,
+`type: "SigmaParseError"` and the pySigma exception class in `error_class`;
+they are not run through the validators.
 
 An **empty array** means the rule passed all active validators.
 
