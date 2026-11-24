@@ -1,6 +1,6 @@
 [project]
 name = "sigma-mcp-server"
-version = "0.2.0"
+version = "0.2.1"
 description = "MCP server for Sigma detection engineering: create, validate and search Sigma rules, and build and test processing pipelines with pySigma"
 readme = "README.md"
 authors = [
@@ -25,7 +25,7 @@ classifiers = [
 dependencies = [
     "fastmcp (>=4.1.1,<5.0.0)",
     "httpx (>=0.27,<1.0.0)",
-    "pysigma (>=2.0.1,<3.0.0)",
+    "pysigma (>=2.1.1,<3.0.0)",
     "pyyaml (>=6.0,<7.0)"
 ]
 
