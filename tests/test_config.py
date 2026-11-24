@@ -79,3 +79,18 @@ class TestIndexMaxAge:
     def test_invalid_falls_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("SIGMA_MCP_INDEX_MAX_AGE_DAYS", "weekly")
         assert config.index_max_age() == timedelta(days=7)
+
+
+class TestToolTimeLimit:
+    def test_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("SIGMA_MCP_TOOL_TIME_LIMIT", raising=False)
+        assert config.tool_time_limit() == 20.0
+
+    @pytest.mark.parametrize(
+        ("value", "expected"), [("5", 5.0), ("0", None), ("x", 20.0)]
+    )
+    def test_configured(
+        self, monkeypatch: pytest.MonkeyPatch, value: str, expected: float | None
+    ) -> None:
+        monkeypatch.setenv("SIGMA_MCP_TOOL_TIME_LIMIT", value)
+        assert config.tool_time_limit() == expected

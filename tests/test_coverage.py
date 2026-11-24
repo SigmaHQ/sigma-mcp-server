@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from pathlib import Path
 
 import pytest
@@ -9,6 +11,7 @@ import pytest
 from sigma.mcp.coverage import (
     LogsourceCoverage,
     analyze_coverage,
+    select_logsources,
     expected_fields,
     summarize,
 )
@@ -145,6 +148,14 @@ transformations:
         proc = results[0]
         assert list(proc.mapped) == ["Image"]  # only field used by every rule
         assert proc.unmapped == [] and proc.unsupported == {}
+
+    def test_deadline_stops_between_logsources(self, index: RuleIndex) -> None:
+        parsed = parse_pipeline(PIPELINE)
+        assert analyze_coverage(parsed, index, deadline=time.monotonic() - 1) == []
+        everything = analyze_coverage(parsed, index, deadline=time.monotonic() + 60)
+        assert [r.stats.key for r in everything] == [
+            s.key for s in select_logsources(index)
+        ]
 
     def test_invalid_field_name(self) -> None:
         stats = LogsourceStats("windows", "windows", None, None, 1, {"bad|": 1})

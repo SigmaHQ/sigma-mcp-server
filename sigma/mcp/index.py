@@ -34,6 +34,19 @@ _TEXT_WEIGHT = 1
 _ID_MATCH_SCORE = 1000
 _MIN_KEYWORD_LENGTH = 3
 
+MAX_QUERY_KEYWORDS = 32
+"""Keywords of a query beyond this number are ignored.
+
+Every keyword is searched in every rule, so without a limit one long query
+cost minutes of CPU time.
+"""
+
+
+def query_keywords(query: str) -> list[str]:
+    """Return the distinct keywords of *query* (lower case, in order)."""
+    words = (kw for kw in query.lower().split() if len(kw) >= _MIN_KEYWORD_LENGTH)
+    return list(dict.fromkeys(words))
+
 
 @dataclass(frozen=True)
 class RuleEntry:
@@ -113,7 +126,8 @@ class RuleIndex:
     def search(self, query: str, max_results: int = 10) -> list[tuple[int, RuleEntry]]:
         """Rank rules by how well they match the keywords in *query*.
 
-        Each keyword (at least three characters, case-insensitive) scores
+        Each distinct keyword (at least three characters, case-insensitive;
+        only the first :data:`MAX_QUERY_KEYWORDS` count) scores
         3 points when it occurs in the title, otherwise 2 points in a tag,
         otherwise 1 point anywhere else in the rule's metadata, logsource or
         detection field names.  A query equal to a rule ID ranks that rule
@@ -122,9 +136,7 @@ class RuleIndex:
         Returns:
             Up to *max_results* ``(score, entry)`` pairs, best match first.
         """
-        keywords = [
-            kw for kw in query.lower().split() if len(kw) >= _MIN_KEYWORD_LENGTH
-        ]
+        keywords = query_keywords(query)[:MAX_QUERY_KEYWORDS]
         exact_id = query.strip()
         scored: list[tuple[int, RuleEntry]] = []
         for entry in self.rules:

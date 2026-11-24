@@ -42,6 +42,10 @@ ENV_RATE_LIMIT = "SIGMA_MCP_RATE_LIMIT"
 ENV_MAX_CONCURRENT_TOOLS = "SIGMA_MCP_MAX_CONCURRENT_TOOLS"
 """Number of tool calls running at the same time in public mode."""
 
+ENV_TOOL_TIME_LIMIT = "SIGMA_MCP_TOOL_TIME_LIMIT"
+"""Seconds after which pipeline coverage and application stop with partial
+results (``0`` = no limit)."""
+
 DEFAULT_INDEX_MAX_AGE_DAYS = 7.0
 DEFAULT_TRANSPORT = "stdio"
 TRANSPORTS = ("stdio", "http")
@@ -50,6 +54,7 @@ DEFAULT_PORT = 8000
 DEFAULT_MAX_INPUT_BYTES = 512 * 1024
 DEFAULT_RATE_LIMIT = 5.0
 DEFAULT_MAX_CONCURRENT_TOOLS = 4
+DEFAULT_TOOL_TIME_LIMIT = 20.0
 
 _APP_DIR_NAME = "sigma-mcp-server"
 _TRUE_VALUES = {"1", "true", "yes", "on"}
@@ -150,3 +155,14 @@ def rate_limit() -> float:
 def max_concurrent_tools() -> int:
     """Return how many tool calls may run at once in public mode (at least 1)."""
     return max(int(_number(ENV_MAX_CONCURRENT_TOOLS, DEFAULT_MAX_CONCURRENT_TOOLS)), 1)
+
+
+def tool_time_limit() -> float | None:
+    """Return the time budget of long-running tools in seconds (``None`` = off).
+
+    The default stays below the 30 seconds a tool call waits for a free
+    slot in public mode, so a few expensive calls cannot keep every slot
+    busy for long.
+    """
+    seconds = _number(ENV_TOOL_TIME_LIMIT, DEFAULT_TOOL_TIME_LIMIT)
+    return seconds if seconds > 0 else None

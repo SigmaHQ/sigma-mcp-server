@@ -202,6 +202,14 @@ class TestGetLogsourceInfo:
         assert [r["key"] for r in data["results"]] == ["process_creation_windows"]
 
     @pytest.mark.anyio
+    async def test_only_the_first_words_count(self) -> None:
+        filler = " ".join(f"zz{n:03d}" for n in range(32))
+        data = await _call(
+            "get_logsource_info", {"activity_description": f"{filler} 4624"}
+        )
+        assert data["fallback"] is True
+
+    @pytest.mark.anyio
     async def test_max_results_clamped(self) -> None:
         data = await _call(
             "get_logsource_info",

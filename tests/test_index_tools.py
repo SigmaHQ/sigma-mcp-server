@@ -101,6 +101,14 @@ class TestWithIndex:
         assert first["rule_set"] == "rules"
 
     @pytest.mark.anyio
+    async def test_search_notes_ignored_keywords(self) -> None:
+        query = "psexec " + " ".join(f"word{n}" for n in range(40))
+        data = await _call("search_rules", {"query": query})
+        assert "first 32 of 41 keywords" in data["note"]
+        assert data["results"][0]["id"] == PSEXEC_ID
+        assert "note" not in await _call("search_rules", {"query": "psexec"})
+
+    @pytest.mark.anyio
     async def test_search_limits_results(self) -> None:
         many = await _call("search_rules", {"query": "windows", "max_results": 0})
         assert len(many["results"]) == 1

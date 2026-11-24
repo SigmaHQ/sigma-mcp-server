@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from functools import reduce
@@ -379,6 +380,49 @@ def _json_safe(value: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
+MAX_PIPELINE_ITEMS = 500
+"""Most transformations the pipelines of one call may have.
+
+Transformations that add conditions make every later one process a larger
+rule, so the work per rule grows with the square of this number.  Real
+pipelines have far fewer transformations.
+"""
+
+MAX_APPLY_WORK = 1_000_000
+"""Most transformations × detection values ``apply_pipeline`` processes in
+one call.  Value transformations cost about 13 µs per value, so the limit
+keeps one call to seconds."""
+
+
+def _value_count(detection: SigmaDetection | SigmaDetectionItem) -> int:
+    if isinstance(detection, SigmaDetectionItem):
+        return max(
+            sum(
+                len(v.values) if isinstance(v, SigmaExpansion) else 1
+                for v in detection.value
+            ),
+            1,
+        )
+    return sum(_value_count(child) for child in detection.detection_items)
+
+
+def rule_value_count(rule: SigmaRule | SigmaCorrelationRule) -> int:
+    """Number of detection values a pipeline processes for *rule* (at least 1)."""
+    if isinstance(rule, SigmaCorrelationRule):
+        return 1
+    return max(sum(_value_count(d) for d in rule.detection.detections.values()), 1)
+
+
+def too_many_items(count: int) -> str | None:
+    """Return an error message if *count* transformations are too many."""
+    if count <= MAX_PIPELINE_ITEMS:
+        return None
+    return (
+        f"The pipelines have {count} transformations; at most "
+        f"{MAX_PIPELINE_ITEMS} are accepted per call."
+    )
+
+
 @dataclass
 class ApplyOutcome:
     """What happened when a pipeline was applied to one rule."""
@@ -466,13 +510,23 @@ def _apply_to_rule(
     return result
 
 
-def apply_pipelines(rule_yaml: str, pipeline_yamls: list[str]) -> dict[str, Any]:
+def apply_pipelines(
+    rule_yaml: str, pipeline_yamls: list[str], deadline: float | None = None
+) -> dict[str, Any]:
     """Apply one or more pipelines to the rules in *rule_yaml*.
+
+    Args:
+        rule_yaml: The rules.
+        pipeline_yamls: The pipelines.
+        deadline: :func:`time.monotonic` value after which no further rule
+            is processed; the remaining ones are counted in
+            ``skipped_rules``.
 
     Returns:
         Dict with ``rules`` (one result per rule, see :func:`_apply_to_rule`),
         ``pipeline_order`` and ``note``; or ``error`` when a pipeline or the
-        rules cannot be parsed.
+        rules cannot be parsed, or the input exceeds
+        :data:`MAX_PIPELINE_ITEMS` or :data:`MAX_APPLY_WORK`.
     """
     if not pipeline_yamls:
         return {"error": "Pass at least one processing pipeline."}
@@ -490,6 +544,19 @@ def apply_pipelines(rule_yaml: str, pipeline_yamls: list[str]) -> dict[str, Any]
         return {"error": f"The rule is not valid YAML: {exc}"}
     if not collection.rules:
         return {"error": "The YAML contains no Sigma rule."}
+    item_count = sum(len(p.pipeline.items) for p in parsed_list)
+    items_error = too_many_items(item_count)
+    if items_error is not None:
+        return {"error": items_error}
+    work = item_count * sum(rule_value_count(rule) for rule in collection.rules)
+    if work > MAX_APPLY_WORK:
+        return {
+            "error": (
+                f"{item_count} transformations on these rules mean {work} "
+                f"value operations; at most {MAX_APPLY_WORK} are accepted per "
+                "call. Apply the pipelines to fewer rules or values at once."
+            )
+        }
 
     order = [
         {"position": n, "name": p.pipeline.name, "priority": p.pipeline.priority}
@@ -498,11 +565,27 @@ def apply_pipelines(rule_yaml: str, pipeline_yamls: list[str]) -> dict[str, Any]
         )
     ]
     combined = combine_pipelines(parsed_list)
+    rules = [
+        r for r in collection.rules if isinstance(r, (SigmaRule, SigmaCorrelationRule))
+    ]
     results: list[dict[str, Any]] = []
-    for rule in collection.rules:
-        if isinstance(rule, (SigmaRule, SigmaCorrelationRule)):
-            results.append(_apply_to_rule(combined, rule))
-    return {"rules": results, "pipeline_order": order, "note": NOT_RUN_NOTE}
+    for rule in rules:
+        if deadline is not None and time.monotonic() >= deadline:
+            break
+        results.append(_apply_to_rule(combined, rule))
+    reply: dict[str, Any] = {
+        "rules": results,
+        "pipeline_order": order,
+        "note": NOT_RUN_NOTE,
+    }
+    if len(results) < len(rules):
+        reply["skipped_rules"] = len(rules) - len(results)
+        reply["message"] = (
+            f"The time limit was reached after {len(results)} of {len(rules)} "
+            "rules; the remaining rules were not processed. Apply the "
+            "pipelines to fewer rules at once."
+        )
+    return reply
 
 
 # ---------------------------------------------------------------------------

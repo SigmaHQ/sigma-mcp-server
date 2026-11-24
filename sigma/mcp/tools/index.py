@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sigma.mcp.index import RuleEntry, RuleIndex
+from sigma.mcp.index import MAX_QUERY_KEYWORDS, RuleEntry, RuleIndex, query_keywords
 from sigma.mcp.index_manager import index_manager
 from sigma.mcp.server import mcp
 
@@ -73,6 +73,12 @@ def search_rules(query: str, max_results: int = 10) -> dict[str, Any]:
     if index is not None:
         for score, entry in index.search(query, limit):
             results.append({**_entry_summary(entry), "score": score})
+    keywords = query_keywords(query)
+    if len(keywords) > MAX_QUERY_KEYWORDS:
+        info["note"] = (
+            f"Only the first {MAX_QUERY_KEYWORDS} of {len(keywords)} keywords "
+            "were used. Search with a few focused keywords."
+        )
     return {**info, "results": results}
 
 
