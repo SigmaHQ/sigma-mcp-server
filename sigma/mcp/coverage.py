@@ -25,6 +25,7 @@ reflected in the field results.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -171,11 +172,23 @@ def analyze_logsource(
     return result
 
 
+def select_logsources(
+    index: RuleIndex, logsource_filter: str = ""
+) -> list[LogsourceStats]:
+    """Logsources of *index* matching *logsource_filter*, most used first."""
+    needle = logsource_filter.strip().lower()
+    return sorted(
+        (s for k, s in index.logsources.items() if not needle or needle in k.lower()),
+        key=lambda s: (-s.rule_count, s.key),
+    )
+
+
 def analyze_coverage(
     parsed: ParsedPipeline,
     index: RuleIndex,
     field_threshold: float = DEFAULT_FIELD_THRESHOLD,
     logsource_filter: str = "",
+    deadline: float | None = None,
 ) -> list[LogsourceCoverage]:
     """Analyse every logsource of *index*, most used logsource first.
 
@@ -186,6 +199,10 @@ def analyze_coverage(
             appear in to be checked (0–1).
         logsource_filter: Case-insensitive substring of logsource keys to
             restrict the analysis to.
+        deadline: :func:`time.monotonic` value after which no further
+            logsource is analysed.  The result then covers only the most
+            used logsources; compare its length with
+            :func:`select_logsources`.
     """
     generic = run_pipeline(
         parsed.pipeline, _probe_rule(_UNRELATED_LOGSOURCE, _PROBE_FIELD)
@@ -193,15 +210,12 @@ def analyze_coverage(
     generic_items = set(generic.applied)
     if generic.failed_item is not None:
         generic_items.add(generic.failed_item)
-    needle = logsource_filter.strip().lower()
-    selected = sorted(
-        (s for k, s in index.logsources.items() if not needle or needle in k.lower()),
-        key=lambda s: (-s.rule_count, s.key),
-    )
-    return [
-        analyze_logsource(parsed, stats, generic_items, field_threshold)
-        for stats in selected
-    ]
+    results: list[LogsourceCoverage] = []
+    for stats in select_logsources(index, logsource_filter):
+        if deadline is not None and time.monotonic() >= deadline:
+            break
+        results.append(analyze_logsource(parsed, stats, generic_items, field_threshold))
+    return results
 
 
 def summarize(results: list[LogsourceCoverage]) -> dict[str, Any]:

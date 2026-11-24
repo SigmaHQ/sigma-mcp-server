@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 from fastmcp.client import Client
 
+from sigma.mcp import pipelines
 from sigma.mcp.index_manager import index_manager
 from sigma.mcp.main import mcp
 from sigma.mcp.repo import RepoSnapshot
@@ -130,6 +131,41 @@ class TestCoverage:
         )
         assert {ls["status"] for ls in data["logsources"]} == {"unsupported"}
         assert data["omitted_logsources"] == 0
+
+    @pytest.mark.anyio
+    @pytest.mark.usefixtures("ready_index")
+    async def test_complete_within_time_limit(self) -> None:
+        data = await _call("analyze_pipeline_coverage", {"pipeline_yaml": PIPELINE})
+        assert data["complete"] is True
+        assert "unanalysed_logsources" not in data
+
+    @pytest.mark.anyio
+    @pytest.mark.usefixtures("ready_index")
+    async def test_time_limit_returns_partial_results(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SIGMA_MCP_TOOL_TIME_LIMIT", "0.000001")
+        data = await _call("analyze_pipeline_coverage", {"pipeline_yaml": PIPELINE})
+        assert data["complete"] is False
+        assert data["unanalysed_logsources"] == 4
+        assert "time limit" in data["message"]
+        assert data["summary"]["total_rules"] == 0
+
+    @pytest.mark.anyio
+    async def test_too_many_transformations(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(pipelines, "MAX_PIPELINE_ITEMS", 1)
+        data = await _call("analyze_pipeline_coverage", {"pipeline_yaml": PIPELINE})
+        assert "at most 1 are accepted" in data["error"]
+
+    @pytest.mark.anyio
+    async def test_apply_uses_time_limit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("SIGMA_MCP_TOOL_TIME_LIMIT", "0.000001")
+        data = await _call(
+            "apply_pipeline", {"rule_yaml": RULE, "pipeline_yamls": [PIPELINE]}
+        )
+        assert data["skipped_rules"] == 1
 
 
 class TestCatalogResource:

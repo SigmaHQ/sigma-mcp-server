@@ -206,6 +206,8 @@ def generate_uuid() -> str:
 
 _MAX_LOGSOURCE_RESULTS = 10
 _MIN_QUERY_WORD = 3
+_MAX_QUERY_WORDS = 32
+"""Words of an activity description beyond this number are ignored."""
 
 
 def _searchable(key: str, info: dict[str, Any]) -> str:
@@ -266,9 +268,11 @@ def get_logsource_info(
         logsource is returned instead.  ``sigma://logsources`` lists every
         logsource of the specification.
     """
-    words = [
-        w for w in activity_description.lower().split() if len(w) >= _MIN_QUERY_WORD
-    ]
+    words = list(
+        dict.fromkeys(
+            w for w in activity_description.lower().split() if len(w) >= _MIN_QUERY_WORD
+        )
+    )[:_MAX_QUERY_WORDS]
     scored: list[tuple[int, str]] = []
     for key, info in LOGSOURCES.items():
         text = _searchable(key, info)

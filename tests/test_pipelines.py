@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from pathlib import Path
 from typing import Any
 
@@ -12,9 +14,12 @@ from sigma.processing.pipeline import ProcessingPipeline
 from sigma.rule import SigmaRule
 from sigma.types import SigmaType
 
+from sigma.mcp import pipelines
 from sigma.mcp.pipelines import (
     PIPELINE_POLICY,
     PipelineParseError,
+    rule_value_count,
+    too_many_items,
     apply_pipelines,
     combine_pipelines,
     parse_pipeline,
@@ -348,6 +353,56 @@ transformations:
         result = apply_pipelines(rule_yaml, pipelines)
         assert set(result) == {"error"}
         assert expected in result["error"]
+
+
+class TestApplyLimits:
+    def test_rule_value_count(self) -> None:
+        rule = _rule(PSEXEC_RULE)
+        assert rule_value_count(rule) == 4
+        windash = _rule(
+            PSEXEC_RULE.replace(
+                "CommandLine|contains: 'accepteula'",
+                "CommandLine|windash|contains: '-accepteula'",
+            )
+        )
+        assert rule_value_count(windash) == 3 + 5
+        correlation = SigmaCollection.from_yaml(
+            """
+title: Many PsExec Executions
+correlation:
+  type: event_count
+  rules: [x]
+  group-by: [Computer]
+  timespan: 10m
+  condition: {gte: 10}
+""",
+            resolve_references=False,
+        ).rules[0]
+        assert isinstance(correlation, SigmaCorrelationRule)
+        assert rule_value_count(correlation) == 1
+
+    def test_too_many_items(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(pipelines, "MAX_PIPELINE_ITEMS", 1)
+        result = apply_pipelines(PSEXEC_RULE, [ECS_PIPELINE])
+        assert set(result) == {"error"}
+        assert "at most 1 are accepted" in result["error"]
+        assert too_many_items(1) is None
+
+    def test_too_much_work(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(pipelines, "MAX_APPLY_WORK", 3)
+        result = apply_pipelines(PSEXEC_RULE, [ECS_PIPELINE])
+        assert set(result) == {"error"}
+        assert "value operations" in result["error"]
+
+    def test_deadline_skips_remaining_rules(self) -> None:
+        rules = PSEXEC_RULE + "\n---\n" + PSEXEC_RULE.replace("0b5b3d5c", "1b5b3d5c")
+        result = apply_pipelines(rules, [ECS_PIPELINE], time.monotonic() - 1)
+        assert result["rules"] == []
+        assert result["skipped_rules"] == 2
+        assert "time limit" in result["message"]
+        done = apply_pipelines(rules, [ECS_PIPELINE], time.monotonic() + 60)
+        assert len(done["rules"]) == 2
+        assert "skipped_rules" not in done
 
 
 class _ExplodingPipeline(ProcessingPipeline):

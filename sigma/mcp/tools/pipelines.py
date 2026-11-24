@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
-from sigma.mcp import coverage
+from sigma.mcp import config, coverage
 from sigma.mcp.index_manager import index_manager
 from sigma.mcp.pipelines import (
     PipelineParseError,
     apply_pipelines,
     parse_pipeline,
+    too_many_items,
 )
 from sigma.mcp.pipelines import validate_pipeline as _validate_pipeline
 from sigma.mcp.server import mcp
@@ -68,9 +70,11 @@ def apply_pipeline(rule_yaml: str, pipeline_yamls: list[str]) -> dict[str, Any]:
         ``field =~ /regex/``, ``field in cidr …``, ``field > n``,
         ``field is null``, combined with ``AND``/``OR``/``NOT``.
         Postprocessing and finalizers are backend-specific and are not run.
-        On invalid input, the dict holds only ``error``.
+        On invalid input, the dict holds only ``error``.  One call accepts
+        at most 500 transformations; when the time limit is reached, the
+        remaining rules are counted in ``skipped_rules``.
     """
-    return apply_pipelines(rule_yaml, pipeline_yamls)
+    return apply_pipelines(rule_yaml, pipeline_yamls, _deadline())
 
 
 @mcp.tool()
@@ -107,25 +111,49 @@ def analyze_pipeline_coverage(
         Sigma's field names), ``unsupported`` (rejected, e.g. by a
         ``detection_item_failure``) and ``dropped``.  On an invalid pipeline,
         or while the rule index is not ready, the dict holds ``error`` or
-        ``message`` instead.
+        ``message`` instead.  ``complete`` is ``false`` when the time limit
+        stopped the analysis; the summary then covers the most used
+        logsources only and ``unanalysed_logsources`` counts the rest (use
+        ``logsource_filter`` to analyse them).  At most 500 transformations
+        are accepted.
     """
+    deadline = _deadline()
     if not 0 <= field_threshold <= 1:
         return {"error": "field_threshold must be between 0 and 1."}
     try:
         parsed = parse_pipeline(pipeline_yaml)
     except PipelineParseError as exc:
         return {"error": f"The pipeline is invalid: {exc}"}
+    items_error = too_many_items(len(parsed.pipeline.items))
+    if items_error is not None:
+        return {"error": items_error}
     index = index_manager.get_index()
     info: dict[str, Any] = {"index_status": index_manager.status.value}
     if index is None:
         return {**info, "message": index_manager.unavailable_message()}
     results = coverage.analyze_coverage(
-        parsed, index, field_threshold, logsource_filter
+        parsed, index, field_threshold, logsource_filter, deadline
     )
+    total = len(coverage.select_logsources(index, logsource_filter))
     limit = min(max(max_logsources, 0), MAX_COVERAGE_LOGSOURCES)
-    return {
+    reply = {
         **info,
+        "complete": len(results) == total,
         "summary": {**coverage.summarize(results), "field_threshold": field_threshold},
         "logsources": [result.to_json() for result in results[:limit]],
         "omitted_logsources": max(len(results) - limit, 0),
     }
+    if len(results) < total:
+        reply["unanalysed_logsources"] = total - len(results)
+        reply["message"] = (
+            f"The time limit was reached after {len(results)} of {total} "
+            "logsources (most used first). Analyse the rest with "
+            "logsource_filter."
+        )
+    return reply
+
+
+def _deadline() -> float | None:
+    """The time.monotonic() value at which long-running tools stop."""
+    limit = config.tool_time_limit()
+    return None if limit is None else time.monotonic() + limit

@@ -11,8 +11,10 @@ import pytest
 from conftest import FIXTURE_COMMIT
 from sigma.mcp.index import (
     INDEX_SCHEMA_VERSION,
+    MAX_QUERY_KEYWORDS,
     LogsourceStats,
     RuleIndex,
+    query_keywords,
     build_index,
     extract_detection_fields,
     load_index,
@@ -180,6 +182,14 @@ class TestSearch:
 
     def test_no_match(self, index: RuleIndex) -> None:
         assert index.search("kubernetes") == []
+
+    def test_only_the_first_keywords_count(self, index: RuleIndex) -> None:
+        filler = " ".join(f"zz{n:03d}" for n in range(MAX_QUERY_KEYWORDS))
+        assert index.search(f"{filler} psexec") == []
+        assert index.search(f"psexec {filler}")[0][1].id == PSEXEC_ID
+
+    def test_query_keywords_are_distinct(self) -> None:
+        assert query_keywords("PsExec psexec a lsass") == ["psexec", "lsass"]
 
     def test_find_by_path_and_unknown(self, index: RuleIndex) -> None:
         entry = index.find(f"  {PSEXEC_PATH} ")

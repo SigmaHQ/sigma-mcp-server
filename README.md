@@ -183,6 +183,14 @@ least 5 % of that logsource's rules.  It reports logsources as `covered`,
 `mapped`, `unmapped`, `unsupported` (rejected by a `detection_item_failure`)
 or `dropped`.
 
+To keep the server responsive, one call accepts at most 500 transformations
+(`apply_pipeline` additionally at most 1 000 000 transformations × detection
+values), and `analyze_pipeline_coverage` and `apply_pipeline` stop after
+`SIGMA_MCP_TOOL_TIME_LIMIT` seconds (default 20, `0` = no limit).  The
+coverage analysis then reports `complete: false` with the most used
+logsources; `apply_pipeline` counts the remaining rules in `skipped_rules`.
+`search_rules` uses the first 32 keywords of a query.
+
 ---
 
 ## Running a public server
@@ -215,6 +223,7 @@ https://<host>/mcp` or as a custom connector in claude.ai.
 | `SIGMA_MCP_MAX_INPUT_BYTES` | `524288` | Maximum size of a tool call's arguments; `0` = unlimited |
 | `SIGMA_MCP_RATE_LIMIT` | `5` | Requests per second and client; `0` = unlimited |
 | `SIGMA_MCP_MAX_CONCURRENT_TOOLS` | `4` | Tool calls running at the same time |
+| `SIGMA_MCP_TOOL_TIME_LIMIT` | `20` | Seconds after which `analyze_pipeline_coverage` and `apply_pipeline` stop with partial results (also outside public mode); `0` = unlimited |
 | `FORWARDED_ALLOW_IPS` | `*` | Proxies whose `X-Forwarded-For` header names the client (uvicorn); restrict it when the server is reachable without a proxy |
 
 Public mode only limits what one process accepts.  Set a request size limit,
