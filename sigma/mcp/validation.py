@@ -16,8 +16,11 @@ from sigma.rule.base import check_alias_expansion
 from sigma.validators.base import SigmaRuleValidator, SigmaValidationIssue
 from sigma.validators.core import validators as _raw_validators
 
+ValidatorClasses = dict[str, type[SigmaRuleValidator]]
+"""Validator identifier → validator class."""
+
 # Typed reference to the core validator registry
-all_validators: dict[str, type[SigmaRuleValidator]] = dict(_raw_validators)
+all_validators: ValidatorClasses = dict(_raw_validators)
 
 
 def issue_to_dict(validator_name: str, issue: SigmaValidationIssue) -> dict[str, Any]:
