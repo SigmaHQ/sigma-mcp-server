@@ -55,6 +55,8 @@ from sigma.types import (
     SigmaType,
 )
 
+from sigma.mcp.validation import too_many_values
+
 PIPELINE_POLICY: SigmaPolicy = SafePolicy
 """Policy for every pipeline parsed by the server."""
 
@@ -482,6 +484,11 @@ def apply_pipelines(rule_yaml: str, pipeline_yamls: list[str]) -> dict[str, Any]
             parsed_list.append(parse_pipeline(pipeline_yaml))
         except PipelineParseError as exc:
             return {"error": f"Pipeline {position} is invalid: {exc}"}
+    # pySigma expands modifiers such as windash while parsing (see
+    # sigma.mcp.validation.MAX_EXPANDED_VALUES).
+    too_many = too_many_values(rule_yaml)
+    if too_many is not None:
+        return {"error": too_many["description"]}
     try:
         collection = SigmaCollection.from_yaml(rule_yaml)
     except SigmaError as exc:

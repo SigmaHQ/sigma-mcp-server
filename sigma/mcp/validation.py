@@ -170,7 +170,7 @@ def expanded_value_count(documents: Iterable[object]) -> int:
     return total
 
 
-def _too_many_values(rule_yaml: str) -> dict[str, Any] | None:
+def too_many_values(rule_yaml: str) -> dict[str, Any] | None:
     """Return a parse issue if *rule_yaml* expands to too many values.
 
     YAML that cannot be loaded here is left to pySigma, which reports it.
@@ -206,7 +206,7 @@ def parse_rules(
         expands to more than :data:`MAX_EXPANDED_VALUES` values is not
         parsed at all.
     """
-    too_many = _too_many_values(rule_yaml)
+    too_many = too_many_values(rule_yaml)
     if too_many is not None:
         return [], [too_many]
     issues: list[dict[str, Any]] = []
