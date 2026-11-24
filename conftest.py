@@ -12,13 +12,13 @@ def anyio_backend() -> str:
 @pytest.fixture(autouse=True)
 def clear_session_cache() -> None:
     """Clear the session state variables before each test to ensure test isolation."""
-    import sigma.mcp.main as main_module
+    import sigma.mcp.tools.rules as rules_module
 
-    main_module._current_validator_names = None
-    main_module._current_exclusions = []
+    rules_module._current_validator_names = None
+    rules_module._current_exclusions = []
 
     yield
 
     # Clear again after test
-    main_module._current_validator_names = None
-    main_module._current_exclusions = []
+    rules_module._current_validator_names = None
+    rules_module._current_exclusions = []

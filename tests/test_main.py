@@ -1,4 +1,4 @@
-"""Tests for sigma.mcp.main."""
+"""Tests for the sigma-mcp-server package."""
 
 from __future__ import annotations
 
@@ -11,24 +11,24 @@ import pytest
 from fastmcp.client import Client
 from mcp.types import TextContent
 
-from sigma.mcp.main import (
-    _fetch_spec,
-    _get_active_validators,
-    _issue_to_dict,
-    _parse_fields,
-    _parse_logsources,
-    _parse_tags,
-    _parse_win_event_channel,
-    _parse_win_event_title,
+from sigma.mcp.knowledge.specification import (
+    SPEC_URL_RULES,
+    SPEC_URL_TAGS,
+    SPEC_URL_TAXONOMY,
     _spec_cache,
-    _SPEC_URL_RULES,
-    _SPEC_URL_TAGS,
-    _SPEC_URL_TAXONOMY,
-    _WIN_EVENT_INDEX,
-    _win_event_content_cache,
-    all_validators,
-    mcp,
+    fetch_spec,
+    parse_fields,
+    parse_logsources,
+    parse_tags,
 )
+from sigma.mcp.knowledge.windows_events import (
+    WIN_EVENT_INDEX,
+    _win_event_content_cache,
+    parse_win_event_channel,
+    parse_win_event_title,
+)
+from sigma.mcp.main import mcp
+from sigma.mcp.validation import all_validators, get_active_validators, issue_to_dict
 from sigma.validators.core.metadata import (
     IdentifierExistenceIssue,
     IdentifierExistenceValidator,
@@ -138,14 +138,14 @@ def prepopulate_spec_cache() -> Generator[None, None, None]:
     This prevents any network calls during tests and makes the test suite
     fully offline-capable.
     """
-    _spec_cache[_SPEC_URL_TAXONOMY] = _TAXONOMY_MD
-    _spec_cache[_SPEC_URL_TAGS] = _TAGS_MD
-    _spec_cache[_SPEC_URL_RULES] = _RULES_MD
+    _spec_cache[SPEC_URL_TAXONOMY] = _TAXONOMY_MD
+    _spec_cache[SPEC_URL_TAGS] = _TAGS_MD
+    _spec_cache[SPEC_URL_RULES] = _RULES_MD
     yield
     # Clean up after each test so tests are isolated
-    _spec_cache.pop(_SPEC_URL_TAXONOMY, None)
-    _spec_cache.pop(_SPEC_URL_TAGS, None)
-    _spec_cache.pop(_SPEC_URL_RULES, None)
+    _spec_cache.pop(SPEC_URL_TAXONOMY, None)
+    _spec_cache.pop(SPEC_URL_TAGS, None)
+    _spec_cache.pop(SPEC_URL_RULES, None)
 
 
 # ---------------------------------------------------------------------------
@@ -196,20 +196,20 @@ logsource:
 
 class TestGetActiveValidators:
     def test_all_validators_when_names_is_none(self) -> None:
-        active = _get_active_validators(None, [])
+        active = get_active_validators(None, [])
         assert active == all_validators
 
     def test_specific_validators_selected(self) -> None:
-        active = _get_active_validators(["identifier_existence"], [])
+        active = get_active_validators(["identifier_existence"], [])
         assert list(active.keys()) == ["identifier_existence"]
 
     def test_exclusion_removes_validator(self) -> None:
-        active = _get_active_validators(None, ["identifier_existence"])
+        active = get_active_validators(None, ["identifier_existence"])
         assert "identifier_existence" not in active
         assert len(active) == len(all_validators) - 1
 
     def test_exclusion_applied_after_allow_list(self) -> None:
-        active = _get_active_validators(
+        active = get_active_validators(
             ["identifier_existence", "identifier_uniqueness"],
             ["identifier_existence"],
         )
@@ -217,11 +217,11 @@ class TestGetActiveValidators:
         assert "identifier_uniqueness" in active
 
     def test_unknown_name_in_allow_list_is_silently_ignored(self) -> None:
-        active = _get_active_validators(["nonexistent"], [])
+        active = get_active_validators(["nonexistent"], [])
         assert active == {}
 
     def test_empty_allow_list_returns_nothing(self) -> None:
-        active = _get_active_validators([], [])
+        active = get_active_validators([], [])
         assert active == {}
 
 
@@ -235,7 +235,7 @@ class TestIssueToDict:
     def test_required_keys_present(self) -> None:
         rule = self._make_rule()
         issue = IdentifierExistenceIssue(rules=[rule])
-        result = _issue_to_dict("identifier_existence", issue)
+        result = issue_to_dict("identifier_existence", issue)
         assert set(result.keys()) >= {
             "validator",
             "type",
@@ -247,19 +247,19 @@ class TestIssueToDict:
     def test_validator_name_stored(self) -> None:
         rule = self._make_rule()
         issue = IdentifierExistenceIssue(rules=[rule])
-        result = _issue_to_dict("identifier_existence", issue)
+        result = issue_to_dict("identifier_existence", issue)
         assert result["validator"] == "identifier_existence"
 
     def test_severity_is_lowercase_string(self) -> None:
         rule = self._make_rule()
         issue = IdentifierExistenceIssue(rules=[rule])
-        result = _issue_to_dict("identifier_existence", issue)
+        result = issue_to_dict("identifier_existence", issue)
         assert result["severity"] == "medium"
 
     def test_rules_list_contains_rule_title(self) -> None:
         rule = self._make_rule()
         issue = IdentifierExistenceIssue(rules=[rule])
-        result = _issue_to_dict("identifier_existence", issue)
+        result = issue_to_dict("identifier_existence", issue)
         assert "Test Rule" in result["rules"]
 
     def test_extra_fields_from_subclass_included(self) -> None:
@@ -270,7 +270,7 @@ class TestIssueToDict:
         rule = self._make_rule()
         uid = UUID("12345678-1234-4321-abcd-1234567890ab")
         issue = IdentifierCollisionIssue(rules=[rule], identifier=uid)
-        result = _issue_to_dict("identifier_uniqueness", issue)
+        result = issue_to_dict("identifier_uniqueness", issue)
         assert "identifier" in result
         assert result["identifier"] == str(uid)
 
@@ -279,7 +279,7 @@ class TestIssueToDict:
 
         rule = SigmaRule.from_yaml(RULE_WITH_ID)
         issue = IdentifierExistenceIssue(rules=[rule])
-        result = _issue_to_dict("identifier_existence", issue)
+        result = issue_to_dict("identifier_existence", issue)
         # rule has an ID, so the UUID string should appear
         assert "12345678-1234-4321-abcd-1234567890ab" in result["rules"]
 
@@ -577,12 +577,12 @@ class TestResources:
 
 class TestParseLogsources:
     def test_returns_list(self) -> None:
-        result = _parse_logsources(_TAXONOMY_MD)
+        result = parse_logsources(_TAXONOMY_MD)
         assert isinstance(result, list)
         assert len(result) > 0
 
     def test_windows_process_creation_present(self) -> None:
-        result = _parse_logsources(_TAXONOMY_MD)
+        result = parse_logsources(_TAXONOMY_MD)
         entry = next(
             (
                 e
@@ -595,7 +595,7 @@ class TestParseLogsources:
         assert entry is not None
 
     def test_windows_security_service_present(self) -> None:
-        result = _parse_logsources(_TAXONOMY_MD)
+        result = parse_logsources(_TAXONOMY_MD)
         entry = next(
             (
                 e
@@ -607,13 +607,13 @@ class TestParseLogsources:
         assert entry is not None
 
     def test_entries_have_at_least_one_logsource_key(self) -> None:
-        result = _parse_logsources(_TAXONOMY_MD)
+        result = parse_logsources(_TAXONOMY_MD)
         logsource_keys = {"product", "category", "service"}
         for entry in result:
             assert logsource_keys & entry.keys(), f"Entry has no logsource key: {entry}"
 
     def test_description_included_when_present(self) -> None:
-        result = _parse_logsources(_TAXONOMY_MD)
+        result = parse_logsources(_TAXONOMY_MD)
         entry = next(
             (
                 e
@@ -628,15 +628,15 @@ class TestParseLogsources:
 
 class TestParseFields:
     def test_returns_dict(self) -> None:
-        result = _parse_fields(_TAXONOMY_MD)
+        result = parse_fields(_TAXONOMY_MD)
         assert isinstance(result, dict)
 
     def test_process_creation_fields_present(self) -> None:
-        result = _parse_fields(_TAXONOMY_MD)
+        result = parse_fields(_TAXONOMY_MD)
         assert any("process_creation" in k for k in result)
 
     def test_known_fields_included(self) -> None:
-        result = _parse_fields(_TAXONOMY_MD)
+        result = parse_fields(_TAXONOMY_MD)
         all_fields: list[str] = []
         for fields in result.values():
             all_fields.extend(fields)
@@ -644,40 +644,40 @@ class TestParseFields:
         assert "CommandLine" in all_fields
 
     def test_fields_are_sorted(self) -> None:
-        result = _parse_fields(_TAXONOMY_MD)
+        result = parse_fields(_TAXONOMY_MD)
         for category, fields in result.items():
             assert fields == sorted(fields), f"Fields for {category} are not sorted"
 
     def test_empty_markdown_returns_empty_dict(self) -> None:
-        assert _parse_fields("# No fields here") == {}
+        assert parse_fields("# No fields here") == {}
 
 
 class TestParseTags:
     def test_returns_dict(self) -> None:
-        result = _parse_tags(_TAGS_MD)
+        result = parse_tags(_TAGS_MD)
         assert isinstance(result, dict)
 
     def test_attack_namespace_present(self) -> None:
-        result = _parse_tags(_TAGS_MD)
+        result = parse_tags(_TAGS_MD)
         assert "attack" in result
 
     def test_cve_namespace_present(self) -> None:
-        result = _parse_tags(_TAGS_MD)
+        result = parse_tags(_TAGS_MD)
         assert "cve" in result
 
     def test_description_is_string(self) -> None:
-        result = _parse_tags(_TAGS_MD)
+        result = parse_tags(_TAGS_MD)
         for namespace, description in result.items():
             assert isinstance(
                 description, str
             ), f"Description for {namespace} is not str"
 
     def test_attack_description_non_empty(self) -> None:
-        result = _parse_tags(_TAGS_MD)
+        result = parse_tags(_TAGS_MD)
         assert result["attack"].strip() != ""
 
     def test_empty_markdown_returns_empty_dict(self) -> None:
-        assert _parse_tags("# No namespaces") == {}
+        assert parse_tags("# No namespaces") == {}
 
 
 # ---------------------------------------------------------------------------
@@ -722,7 +722,7 @@ class TestNewResources:
     @pytest.mark.anyio
     async def test_fields_for_known_category_returns_list(self) -> None:
         async with Client(mcp) as client:
-            fields_map = _parse_fields(_TAXONOMY_MD)
+            fields_map = parse_fields(_TAXONOMY_MD)
             if not fields_map:
                 pytest.skip("No field categories in fixture")
             category = next(iter(fields_map))
@@ -782,7 +782,7 @@ class TestFetchSpec:
         """When the URL is already in the cache, the cached value is returned."""
         _spec_cache["https://example.com/test"] = "cached content"
         try:
-            result = await _fetch_spec("https://example.com/test")
+            result = await fetch_spec("https://example.com/test")
             assert result == "cached content"
         finally:
             _spec_cache.pop("https://example.com/test", None)
@@ -804,8 +804,11 @@ class TestFetchSpec:
             mock_client.__aexit__ = AsyncMock(return_value=None)
             mock_client.get = AsyncMock(return_value=mock_response)
 
-            with patch("sigma.mcp.main.httpx.AsyncClient", return_value=mock_client):
-                result = await _fetch_spec(test_url)
+            with patch(
+                "sigma.mcp.knowledge.specification.httpx.AsyncClient",
+                return_value=mock_client,
+            ):
+                result = await fetch_spec(test_url)
 
             assert result == "mock markdown"
             assert _spec_cache[test_url] == "mock markdown"
@@ -894,43 +897,43 @@ def clear_win_event_content_cache() -> Generator[None, None, None]:
 
 class TestParseWinEventTitle:
     def test_extracts_h1_title(self) -> None:
-        assert _parse_win_event_title(_WIN_EVENTS_SAMPLE_MD) == (
+        assert parse_win_event_title(_WIN_EVENTS_SAMPLE_MD) == (
             "An account was successfully logged on."
         )
 
     def test_returns_empty_string_when_no_h1(self) -> None:
-        assert _parse_win_event_title("No heading here\nJust text.") == ""
+        assert parse_win_event_title("No heading here\nJust text.") == ""
 
     def test_strips_whitespace(self) -> None:
         md = "#  Spaced Title  \nBody"
-        assert _parse_win_event_title(md) == "Spaced Title"
+        assert parse_win_event_title(md) == "Spaced Title"
 
 
 class TestParseWinEventChannel:
     def test_extracts_security_channel(self) -> None:
-        assert _parse_win_event_channel(_WIN_EVENTS_SAMPLE_MD) == "security"
+        assert parse_win_event_channel(_WIN_EVENTS_SAMPLE_MD) == "security"
 
     def test_lowercases_channel(self) -> None:
         md = "<Channel>SECURITY</Channel>"
-        assert _parse_win_event_channel(md) == "security"
+        assert parse_win_event_channel(md) == "security"
 
     def test_defaults_to_security_when_absent(self) -> None:
-        assert _parse_win_event_channel("No channel XML here.") == "security"
+        assert parse_win_event_channel("No channel XML here.") == "security"
 
 
 class TestWinEventIndex:
     def test_index_is_non_empty_dict(self) -> None:
-        assert isinstance(_WIN_EVENT_INDEX, dict)
-        assert len(_WIN_EVENT_INDEX) > 0
+        assert isinstance(WIN_EVENT_INDEX, dict)
+        assert len(WIN_EVENT_INDEX) > 0
 
     def test_security_channel_present(self) -> None:
-        assert "security" in _WIN_EVENT_INDEX
+        assert "security" in WIN_EVENT_INDEX
 
     def test_event_4624_present(self) -> None:
-        assert "4624" in _WIN_EVENT_INDEX["security"]
+        assert "4624" in WIN_EVENT_INDEX["security"]
 
     def test_event_titles_are_strings(self) -> None:
-        for event_id, title in _WIN_EVENT_INDEX["security"].items():
+        for event_id, title in WIN_EVENT_INDEX["security"].items():
             assert isinstance(event_id, str)
             assert isinstance(title, str)
             assert len(title) > 0
@@ -961,7 +964,9 @@ class TestWindowsEventsResource:
 
     @pytest.mark.anyio
     async def test_get_windows_event_returns_markdown(self) -> None:
-        with patch("sigma.mcp.main.httpx.AsyncClient") as mock_client_cls:
+        with patch(
+            "sigma.mcp.knowledge.windows_events.httpx.AsyncClient"
+        ) as mock_client_cls:
             mock_response = mock_client_cls.return_value.__aenter__.return_value
             mock_response.get = mock_response.get
             import asyncio
@@ -984,7 +989,9 @@ class TestWindowsEventsResource:
 
     @pytest.mark.anyio
     async def test_get_windows_event_cached_after_first_fetch(self) -> None:
-        with patch("sigma.mcp.main.httpx.AsyncClient") as mock_client_cls:
+        with patch(
+            "sigma.mcp.knowledge.windows_events.httpx.AsyncClient"
+        ) as mock_client_cls:
             mock_response = mock_client_cls.return_value.__aenter__.return_value
 
             async def _fake_get(url: str) -> Any:
@@ -1004,7 +1011,9 @@ class TestWindowsEventsResource:
     @pytest.mark.anyio
     async def test_get_windows_event_uses_cache_on_second_call(self) -> None:
         _win_event_content_cache["4624"] = _WIN_EVENTS_SAMPLE_MD
-        with patch("sigma.mcp.main.httpx.AsyncClient") as mock_client_cls:
+        with patch(
+            "sigma.mcp.knowledge.windows_events.httpx.AsyncClient"
+        ) as mock_client_cls:
             async with Client(mcp) as client:
                 contents = await client.read_resource(
                     "sigma://events/windows/security/4624"
