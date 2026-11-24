@@ -18,6 +18,10 @@ SPEC_URL_TAGS = (
     "https://raw.githubusercontent.com/SigmaHQ/sigma-specification/main/"
     "specification/sigma-appendix-tags.md"
 )
+SPEC_URL_CORRELATION = (
+    "https://raw.githubusercontent.com/SigmaHQ/sigma-specification/main/"
+    "specification/sigma-correlation-rules-specification.md"
+)
 SPEC_URL_RULES = (
     "https://raw.githubusercontent.com/SigmaHQ/sigma-specification/main/"
     "specification/sigma-rules-specification.md"

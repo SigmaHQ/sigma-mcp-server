@@ -1,0 +1,41 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Install dependencies
+        run: |
+          poetry env use "$(which python)"
+          poetry install --no-interaction
+
+      - name: Check formatting
+        run: poetry run black --check sigma/ tests/ conftest.py
+
+      - name: Type check
+        run: poetry run mypy sigma/mcp/ tests/
+
+      - name: Run tests
+        run: poetry run pytest --cov=sigma/mcp --cov-report=term-missing

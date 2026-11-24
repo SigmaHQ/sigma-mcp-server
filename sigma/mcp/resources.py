@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import json
+from typing import Any
+
+import httpx
 
 from sigma.modifiers import modifier_mapping
 
+from sigma.mcp.knowledge.correlation import CORRELATION_RULES_SPEC
 from sigma.mcp.knowledge.specification import (
+    SPEC_URL_CORRELATION,
     SPEC_URL_RULES,
     SPEC_URL_TAGS,
     SPEC_URL_TAXONOMY,
@@ -16,6 +21,8 @@ from sigma.mcp.knowledge.specification import (
     parse_tags,
 )
 from sigma.mcp.knowledge.windows_events import WIN_EVENT_INDEX, fetch_windows_event
+from sigma.mcp.index_manager import index_manager
+from sigma.mcp.pipelines import pipeline_catalog
 from sigma.mcp.server import mcp
 from sigma.mcp.validation import all_validators
 
@@ -112,6 +119,23 @@ async def get_specification() -> str:
     return await fetch_spec(SPEC_URL_RULES)
 
 
+@mcp.resource("sigma://specification/correlation")
+async def get_correlation_specification() -> str:
+    """Return the Sigma correlation rules specification as Markdown.
+
+    Read this before writing a correlation rule (``event_count``,
+    ``value_count``, ``temporal``, ``temporal_ordered``, ``value_sum``,
+    ``value_avg``, ``value_percentile``).  Fetched from the official
+    sigma-specification repository on first use and cached; when it cannot
+    be fetched, a condensed offline reference with syntax, examples and
+    common mistakes is returned instead.
+    """
+    try:
+        return await fetch_spec(SPEC_URL_CORRELATION)
+    except httpx.HTTPError:
+        return CORRELATION_RULES_SPEC
+
+
 @mcp.resource("sigma://events/windows")
 def list_windows_events() -> dict[str, dict[str, str]]:
     """List all documented Windows Security Auditing events grouped by log channel.
@@ -144,3 +168,54 @@ async def get_windows_event(channel: str, event_id: str) -> str:
         Raw Markdown text of the event documentation page.
     """
     return await fetch_windows_event(event_id)
+
+
+@mcp.resource("sigma://statistics/logsources")
+def get_logsource_statistics_resource() -> dict[str, Any]:
+    """Full logsource statistics of the SigmaHQ rule repository.
+
+    Returns a dict with ``index_status``, ``generated_at``, ``source_commit``,
+    ``total_rules`` and ``logsources``, which maps each logsource key
+    (``product/category/service``) to its ``product``, ``category``,
+    ``service``, ``rule_count`` and ``fields`` (field name → number of rules
+    using it).  While the rule index is not available, the dict holds
+    ``index_status`` and a ``message`` instead.
+    """
+    index = index_manager.get_index()
+    if index is None:
+        return {
+            "index_status": index_manager.status.value,
+            "message": index_manager.unavailable_message(),
+        }
+    return {
+        "index_status": index_manager.status.value,
+        "generated_at": index.generated_at.isoformat(),
+        "source_commit": index.source_commit,
+        "total_rules": index.rules_with_logsource,
+        "logsources": {
+            key: {
+                "product": stats.product,
+                "category": stats.category,
+                "service": stats.service,
+                "rule_count": stats.rule_count,
+                "fields": dict(stats.top_fields()),
+            }
+            for key, stats in index.logsources.items()
+        },
+    }
+
+
+@mcp.resource("sigma://pipelines/transformations")
+def list_pipeline_building_blocks() -> dict[str, dict[str, str]]:
+    """All building blocks of Sigma processing pipelines, with descriptions.
+
+    Returns a dict with the sections ``transformations``,
+    ``rule_conditions``, ``detection_item_conditions``,
+    ``field_name_conditions``, ``postprocessing`` and ``finalizers``.  Each
+    maps the identifier used as ``type:`` in pipeline YAML (e.g.
+    ``field_name_mapping``, ``logsource``, ``include_fields``) to the first
+    paragraph of its pySigma documentation.  Generated from the installed
+    pySigma version, so it always matches what ``validate_pipeline``
+    accepts.
+    """
+    return pipeline_catalog()
