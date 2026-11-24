@@ -6,8 +6,10 @@ import uuid
 from collections import Counter
 from typing import Any
 
+import anyio.to_thread
 import yaml
 from fastmcp import Context
+from sigma.validators.base import SigmaRuleValidator
 
 from sigma.mcp.index_manager import index_manager
 from sigma.mcp.knowledge.logsources import LOGSOURCES
@@ -43,6 +45,14 @@ def _single_client(ctx: Context) -> bool:
 
 def _unknown(names: list[str]) -> list[str]:
     return [n for n in names if n not in all_validators]
+
+
+def _parse_and_validate(
+    rule_yaml: str, active: dict[str, type[SigmaRuleValidator]]
+) -> list[dict[str, Any]]:
+    """Parse *rule_yaml* and run *active* over the rules (runs in a thread)."""
+    rules, issues = parse_rules(rule_yaml)
+    return issues + run_validators(rules, active)
 
 
 @mcp.tool()
@@ -113,8 +123,9 @@ async def validate_rule(
     }
     active = {name: cls for name, cls in active.items() if name not in skipped}
 
-    rules, issues = parse_rules(rule_yaml)
-    issues += run_validators(rules, active)
+    # Parsing and validating is CPU-bound; on the event loop it would stall
+    # every other request (and health checks) until it is done.
+    issues = await anyio.to_thread.run_sync(_parse_and_validate, rule_yaml, active)
     issues += [
         {
             "validator": name,
