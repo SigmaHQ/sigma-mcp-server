@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import anyio
 import httpx
 import pytest
 from fastmcp.client import Client
@@ -18,8 +20,10 @@ from sigma.mcp.knowledge.logsources import LOGSOURCES
 from sigma.mcp.knowledge.specification import SPEC_URL_CORRELATION, _spec_cache
 from sigma.mcp.main import mcp
 from sigma.mcp.naming import build_filename, filename_issues, filename_prefix
+from sigma.mcp.pipelines import apply_pipelines
 from sigma.mcp.repo import RepoSnapshot
-from sigma.mcp.validation import parse_rules, run_validators
+from sigma.mcp import validation
+from sigma.mcp.validation import expanded_value_count, parse_rules, run_validators
 
 BASE_RULE = """
 title: Failed Logon
@@ -164,6 +168,91 @@ class TestValidateRuleTool:
         issues = await _call("validate_rule", {"rule_yaml": CORRELATION})
         parser = [i for i in issues if i["validator"] == "parser"]
         assert parser[0]["error_class"] == "SigmaRuleNotFoundError"
+
+    @pytest.mark.anyio
+    async def test_event_loop_stays_responsive(self) -> None:
+        """Parsing runs in a worker thread, not on the event loop."""
+
+        def slow_parse(rule_yaml: str) -> tuple[list[Any], list[dict[str, Any]]]:
+            time.sleep(0.5)
+            return [], []
+
+        gaps: list[float] = []
+
+        async def ticker() -> None:
+            last = time.perf_counter()
+            for _ in range(60):
+                await anyio.sleep(0.01)
+                now = time.perf_counter()
+                gaps.append(now - last)
+                last = now
+
+        with patch("sigma.mcp.tools.rules.parse_rules", slow_parse):
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(ticker)
+                await _call("validate_rule", {"rule_yaml": BASE_RULE})
+        assert max(gaps) < 0.3
+
+
+def _windash_rule(values: int) -> str:
+    items = "\n".join(f"            - '-a -b -c{i}'" for i in range(values))
+    return BASE_RULE.replace(
+        "        EventID: 4625\n",
+        f"        EventID: 4625\n        CommandLine|windash|contains:\n{items}\n",
+    )
+
+
+class TestValueLimit:
+    @pytest.mark.parametrize(
+        ("detection", "expected"),
+        [
+            ({"sel": {"A": "x", "B": ["y", "z"]}, "condition": "sel"}, 3),
+            ({"sel": {"A|windash": "-a -b -c -d"}}, 125),
+            ({"sel": {"A|windash": "-a"}, "timeframe": "5m"}, 5),
+            ({"sel": {"A|base64offset|contains": ["x", "y"]}}, 6),
+            ({"sel": [{"A": "x"}, {"B|windash|base64offset": "/x"}]}, 16),
+            ({"keywords": ["a", "b", {"A": ["x", ["deep", "list"]]}]}, 4),
+            ({"sel": {"A|windash": 5}}, 1),
+        ],
+    )
+    def test_expanded_value_count(
+        self, detection: dict[str, Any], expected: int
+    ) -> None:
+        assert expanded_value_count([{"detection": detection}]) == expected
+
+    def test_documents_without_detection(self) -> None:
+        documents = ["text", {"title": "x"}, {"detection": ["not", "a", "map"]}]
+        assert expanded_value_count(documents) == 0
+
+    def test_too_many_values_are_not_parsed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(validation, "MAX_EXPANDED_VALUES", 1000)
+        rules, issues = parse_rules(_windash_rule(10))
+        assert rules == []
+        assert issues[0]["error_class"] == "TooManyValues"
+        assert "about 1251 detection values" in issues[0]["description"]
+
+    def test_rules_below_the_limit_are_parsed(self) -> None:
+        rules, issues = parse_rules(_windash_rule(10))
+        assert len(rules) == 1
+        assert not issues
+
+    def test_unloadable_yaml_is_left_to_pysigma(self) -> None:
+        rules, issues = parse_rules("a: [b")
+        assert issues[0]["error_class"] == "YAMLError"
+
+    def test_apply_pipeline_checks_the_limit_too(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(validation, "MAX_EXPANDED_VALUES", 1000)
+        pipeline = (
+            "transformations:\n  - type: field_name_mapping\n    mapping: {A: B}\n"
+        )
+        result = apply_pipelines(_windash_rule(10), [pipeline])
+        assert set(result) == {"error"}
+        assert "about 1251 detection values" in result["error"]
+        assert "rules" in apply_pipelines(_windash_rule(1), [pipeline])
 
 
 class TestGetLogsourceInfo:

@@ -311,7 +311,10 @@ Additional subclass-specific fields (e.g. `identifier`) may also be present.
 
 Rules that cannot be parsed are reported with `validator: "parser"`,
 `type: "SigmaParseError"` and the pySigma exception class in `error_class`;
-they are not run through the validators.
+they are not run through the validators.  One call accepts rules with at
+most 50 000 detection values after modifier expansion (`windash` turns a
+value into up to 125, `base64offset` into 3); larger input is reported with
+`error_class: "TooManyValues"` and not parsed.
 
 An **empty array** means the rule passed all active validators.
 
