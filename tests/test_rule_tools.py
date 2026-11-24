@@ -20,6 +20,7 @@ from sigma.mcp.knowledge.logsources import LOGSOURCES
 from sigma.mcp.knowledge.specification import SPEC_URL_CORRELATION, _spec_cache
 from sigma.mcp.main import mcp
 from sigma.mcp.naming import build_filename, filename_issues, filename_prefix
+from sigma.mcp.pipelines import apply_pipelines
 from sigma.mcp.repo import RepoSnapshot
 from sigma.mcp import validation
 from sigma.mcp.validation import expanded_value_count, parse_rules, run_validators
@@ -240,6 +241,18 @@ class TestValueLimit:
     def test_unloadable_yaml_is_left_to_pysigma(self) -> None:
         rules, issues = parse_rules("a: [b")
         assert issues[0]["error_class"] == "YAMLError"
+
+    def test_apply_pipeline_checks_the_limit_too(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(validation, "MAX_EXPANDED_VALUES", 1000)
+        pipeline = (
+            "transformations:\n  - type: field_name_mapping\n    mapping: {A: B}\n"
+        )
+        result = apply_pipelines(_windash_rule(10), [pipeline])
+        assert set(result) == {"error"}
+        assert "about 1251 detection values" in result["error"]
+        assert "rules" in apply_pipelines(_windash_rule(1), [pipeline])
 
 
 class TestGetLogsourceInfo:

@@ -12,7 +12,6 @@ from sigma.processing.pipeline import ProcessingPipeline
 from sigma.rule import SigmaRule
 from sigma.types import SigmaType
 
-from sigma.mcp import validation
 from sigma.mcp.pipelines import (
     PIPELINE_POLICY,
     PipelineParseError,
@@ -349,19 +348,6 @@ transformations:
         result = apply_pipelines(rule_yaml, pipelines)
         assert set(result) == {"error"}
         assert expected in result["error"]
-
-    def test_too_many_values_are_not_parsed(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(validation, "MAX_EXPANDED_VALUES", 100)
-        values = "\n".join(f"            - '-a -b{i}'" for i in range(5))
-        rule = PSEXEC_RULE.replace(
-            "    condition:",
-            f"    many:\n        CommandLine|windash:\n{values}\n    condition:",
-        )
-        result = apply_pipelines(rule, [ECS_PIPELINE])
-        assert set(result) == {"error"}
-        assert "detection values" in result["error"]
 
 
 class _ExplodingPipeline(ProcessingPipeline):
