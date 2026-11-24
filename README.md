@@ -302,17 +302,35 @@ The GitHub workflow `tests.yml` runs these checks on Python 3.11, 3.12 and
 
 ### Releasing
 
+Releases have two stages, as in pySigma:
+
 1. Set the new version in `pyproject.toml` (`poetry version <version>`) and
    merge it into `main`.
-2. Create a GitHub release with the tag `v<version>` (e.g. `v0.2.0`).
+2. Push the tag `v<version>` (e.g. `git tag v0.2.0 && git push origin v0.2.0`).
+   The workflow `release.yml` checks that the tag matches the package
+   version, runs the checks, builds the package and publishes it to
+   [TestPyPI](https://test.pypi.org/project/sigma-mcp-server/).  Try it in a
+   fresh virtual environment (dependencies come from PyPI):
 
-The workflow `release.yml` checks that the tag matches the package version,
-runs the tests, builds the package and publishes it to PyPI with
-[trusted publishing](https://docs.pypi.org/trusted-publishers/).  This needs a
-one-time setup: on PyPI, add a trusted publisher for the repository
-`SigmaHQ/sigma-mcp-server` with the workflow `release.yml` and the
-environment `pypi`, and create the environment `pypi` in the repository
-settings.
+   ```bash
+   python -m venv /tmp/sigma-mcp-test
+   /tmp/sigma-mcp-test/bin/pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ sigma-mcp-server==<version>
+   ```
+
+3. Create and publish a GitHub release for that tag.  The workflow builds
+   the package again and publishes it to [PyPI](https://pypi.org/project/sigma-mcp-server/).
+
+Creating a GitHub release together with a new tag runs both stages at the
+same time; push the tag first to test the package before releasing it.
+
+Uploads use [trusted publishing](https://docs.pypi.org/trusted-publishers/),
+so no API token is stored.  One-time setup:
+
+- on test.pypi.org and on pypi.org, add a trusted publisher for the
+  repository `SigmaHQ/sigma-mcp-server` with the workflow `release.yml` and
+  the environment `testpypi` or `pypi` respectively;
+- in the repository settings, create the environments `testpypi` and `pypi`
+  (optionally with required reviewers for `pypi`).
 
 ## License
 

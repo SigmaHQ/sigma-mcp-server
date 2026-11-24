@@ -57,8 +57,9 @@ conftest.py       # fixtures: anyio backend, isolated index data dir, fake downl
 ---
 
 CI: `.github/workflows/tests.yml` runs black, mypy and pytest on Python
-3.11–3.13; `.github/workflows/release.yml` publishes to PyPI when a GitHub
-release `v<version>` is published (the tag must match `pyproject.toml`).
+3.11–3.13; `.github/workflows/release.yml` publishes to TestPyPI when a tag
+`v<version>` is pushed and to PyPI when a GitHub release for it is published
+(the tag must match the version in `pyproject.toml`).
 
 ---
 

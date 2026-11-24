@@ -1,15 +1,21 @@
 name: Release
 
-# Publishes the package to PyPI when a GitHub release is published.
-# The release tag must be the package version, optionally prefixed with "v"
-# (e.g. v0.2.0 for version 0.2.0).
+# Two-stage release, as in pySigma:
 #
-# Uses PyPI trusted publishing, so no API token is stored in GitHub. One-time
-# setup: on PyPI, add a trusted publisher for this repository with workflow
-# "release.yml" and environment "pypi", and create the environment "pypi" in
+# 1. Pushing a tag v<version> (e.g. v0.2.0) publishes to TestPyPI.
+# 2. Publishing a GitHub release for that tag publishes to PyPI.
+#
+# Both stages check that the tag matches the package version, run the
+# checks and build the package. Uploads use trusted publishing, so no API
+# token is stored. One-time setup: add trusted publishers on test.pypi.org
+# (environment "testpypi") and pypi.org (environment "pypi") for this
+# repository and the workflow "release.yml", and create both environments in
 # the repository settings.
 
 on:
+  push:
+    tags:
+      - "v*.*.*"
   release:
     types: [published]
 
@@ -21,9 +27,9 @@ jobs:
     name: Test and build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
@@ -33,9 +39,8 @@ jobs:
       - name: Check that the tag matches the package version
         run: |
           version="$(poetry version --short)"
-          tag="${GITHUB_REF_NAME#v}"
-          if [ "$version" != "$tag" ]; then
-            echo "::error::Release tag $GITHUB_REF_NAME does not match package version $version"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package version $version (expected v$version)"
             exit 1
           fi
 
@@ -43,6 +48,9 @@ jobs:
         run: |
           poetry env use "$(which python)"
           poetry install --no-interaction
+
+      - name: Check formatting
+        run: poetry run black --check sigma/ tests/ conftest.py
 
       - name: Run tests
         run: poetry run pytest
@@ -56,8 +64,29 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  publish:
+  publish-testpypi:
+    name: Publish to TestPyPI
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/sigma-mcp-server/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
     name: Publish to PyPI
+    if: github.event_name == 'release'
     needs: build
     runs-on: ubuntu-latest
     environment:
