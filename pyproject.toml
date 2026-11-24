@@ -1,6 +1,6 @@
 [project]
 name = "sigma-mcp-server"
-version = "0.2.1"
+version = "0.3.0"
 description = "MCP server for Sigma detection engineering: create, validate and search Sigma rules, and build and test processing pipelines with pySigma"
 readme = "README.md"
 authors = [
