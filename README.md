@@ -23,6 +23,7 @@ and other MCP clients.
 | `validate_pipeline` | Validate a processing pipeline (YAML); returns errors, style warnings and a summary of its transformations |
 | `apply_pipeline` | Apply one or more processing pipelines to a rule and show the result: field mappings, failures, state and the transformed detections |
 | `analyze_pipeline_coverage` | Measure which SigmaHQ logsources and fields a processing pipeline supports, maps, rejects or leaves untouched |
+| `list_resources` / `read_resource` | List and read every resource below, for clients that support tools but not resources |
 
 ### Resources
 
@@ -44,12 +45,14 @@ and other MCP clients.
 
 | Prompt | Description |
 |---|---|
+| `create_sigma_rules` | Interactive workflow for creating Sigma rules: hypotheses, check SigmaHQ for existing rules, choose logsource and fields, draft, validate, save. Optional `task` argument |
+| `create_processing_pipeline` | Interactive workflow for creating a processing pipeline: gather the environment, draft, validate, test with SigmaHQ rules, analyse coverage. Optional `task` argument |
 | `create_sigma_rule_from_description` | Guide an LLM to create and validate a Sigma detection rule from a natural language description |
 | `create_sigma_rules_from_url` | Guide an LLM to extract and validate Sigma rules from a blog post or threat report URL |
 
 ## Requirements
 
-- Python ≥ 3.10
+- Python ≥ 3.11
 - [Poetry](https://python-poetry.org/) (for development / installation)
 
 ## Installation
@@ -89,6 +92,39 @@ Add the following entry to your MCP client configuration (e.g.
 
 Adjust the `command` path to the installed binary if it is not on `PATH`.
 
+### Using with Claude Code
+
+Install the server so that `sigma-mcp-server` is on your `PATH`, for example
+with [pipx](https://pipx.pypa.io/):
+
+```bash
+pipx install git+https://github.com/SigmaHQ/sigma-mcp-server
+```
+
+Then register it with Claude Code:
+
+```bash
+claude mcp add sigma -- sigma-mcp-server
+```
+
+The workflows are available as commands in Claude Code:
+
+- `/mcp__sigma__create_sigma_rules` creates Sigma rules from a description
+  or a threat report URL.
+- `/mcp__sigma__create_processing_pipeline` builds a processing pipeline for
+  your SIEM.
+
+Claude Code then uses the server's tools to search SigmaHQ, validate rules
+and pipelines, test pipelines against SigmaHQ rules and measure coverage,
+and its own tools to read URLs and write files.
+
+### Using the workflows in your own agent
+
+The workflow prompts double as system prompts: fetch `create_sigma_rules` or
+`create_processing_pipeline` without arguments and use the text as the
+agent's instructions.  Agents that cannot read MCP resources use the
+`list_resources` and `read_resource` tools instead.
+
 ### SigmaHQ rule index
 
 `search_rules`, `get_rule`, `get_logsource_statistics` and
@@ -111,6 +147,16 @@ directory; a lock file makes sure only one of them downloads at a time.
 | `SIGMA_MCP_NO_WARMUP` | unset | Set to `1` to skip loading/building the index at startup; a saved index is then loaded on first use, and `update_sigma_repository` builds one on demand |
 
 The first download needs access to `codeload.github.com`.
+
+### MITRE ATT&CK and D3FEND data
+
+The validators `attacktag` and `d3_fendtag` need the MITRE ATT&CK and D3FEND
+data, which pySigma downloads once and caches (in `~/.cache/pysigma`).  The
+server loads it in the background at startup.  Until it is available,
+`validate_rule` skips these validators and reports a `ValidatorSkipped`
+issue; after a failed download it tries again at most every 10 minutes.
+`ValidatorSkipped` and `ValidatorError` issues are not problems with the
+rule.
 
 ### Processing pipelines
 

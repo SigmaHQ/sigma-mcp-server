@@ -13,6 +13,7 @@ from sigma.mcp.index_manager import index_manager
 from sigma.mcp.knowledge.logsources import LOGSOURCES
 from sigma.mcp.index import logsource_key
 from sigma.mcp.naming import build_filename, filename_issues
+from sigma.mcp.reference_data import reference_data
 from sigma.mcp.server import mcp
 from sigma.mcp.validation import (
     all_validators,
@@ -53,7 +54,10 @@ async def validate_rule(ctx: Context, rule_yaml: str) -> list[dict[str, Any]]:
         ``type: SigmaParseError`` and the pySigma exception in
         ``error_class``; they are not run through the validators.  A
         correlation rule referencing a rule missing from *rule_yaml* is
-        reported the same way.  An empty list means no issues were found.
+        reported the same way.  Issues of type ``ValidatorError`` (a
+        validator crashed) and ``ValidatorSkipped`` (its MITRE ATT&CK or
+        D3FEND data is not available yet) are not problems with the rule.
+        An empty list means no issues were found.
     """
     validator_names: list[str] | None = await ctx.get_state(_STATE_VALIDATOR_NAMES)
     raw_exclusions: list[str] | None = await ctx.get_state(_STATE_EXCLUSIONS)
@@ -65,8 +69,32 @@ async def validate_rule(ctx: Context, rule_yaml: str) -> list[dict[str, Any]]:
     exclusions: list[str] = raw_exclusions if raw_exclusions is not None else []
     active = get_active_validators(validator_names, exclusions)
 
+    # Validators whose MITRE data is not loaded yet would block on a
+    # download; skip them and say so (see sigma.mcp.reference_data).
+    reference_data.start_loading()
+    skipped = {
+        name: reason
+        for name, reason in reference_data.unavailable_validators().items()
+        if name in active
+    }
+    active = {name: cls for name, cls in active.items() if name not in skipped}
+
     rules, issues = parse_rules(rule_yaml)
-    return issues + run_validators(rules, active)
+    issues += run_validators(rules, active)
+    issues += [
+        {
+            "validator": name,
+            "type": "ValidatorSkipped",
+            "severity": "low",
+            "description": (
+                f"The validator was skipped because {reason}. This is not a "
+                "problem with the rule."
+            ),
+            "rules": [],
+        }
+        for name, reason in skipped.items()
+    ]
+    return issues
 
 
 @mcp.tool()

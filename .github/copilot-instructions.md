@@ -27,8 +27,10 @@ sigma/mcp/
     index_manager.py       # background refresh, states, inter-process file lock
     pipelines.py           # parse (safe policy), validate, apply + render pipelines
     coverage.py            # pipeline coverage via probe rules per logsource/field
+    reference_data.py      # background loading of MITRE ATT&CK / D3FEND data
     resources.py           # @mcp.resource handlers
     prompts.py             # @mcp.prompt handlers
+    workflows.py           # texts of the create_sigma_rules / pipeline workflows
     tools/
         rules.py           # @mcp.tool handlers for Sigma rules + session state
         index.py           # @mcp.tool handlers for search and statistics
@@ -47,6 +49,7 @@ tests/
     test_index_tools.py  # index tools end-to-end through Client(mcp)
     test_pipelines.py, test_coverage.py, test_pipeline_tools.py
     test_rule_tools.py   # collections, logsource info, file names, correlation spec
+    test_workflows.py    # workflow prompts, resource tools, MITRE reference data
     data/sigma-repo/ # miniature SigmaHQ repository used by the index tests
 conftest.py       # fixtures: anyio backend, isolated index data dir, fake downloader
 ```
@@ -80,6 +83,11 @@ conftest.py       # fixtures: anyio backend, isolated index data dir, fake downl
   otherwise its components are never registered.
 - Keep domain logic (fetching, parsing, validation) in plain functions outside
   the decorated handlers, so it can be unit-tested without an MCP client.
+- Every resource is also reachable as a tool through FastMCP's
+  `ResourcesAsTools` transform (`list_resources`, `read_resource`), for
+  clients without resource support.  Do not add tool copies of resources.
+- The workflow texts in `workflows.py` may only mention tools and resources
+  that exist; `tests/test_workflows.py` checks this.  Update both together.
 - Tools must never block on long-running work.  The SigmaHQ rule index is
   built in a background thread by `index_manager`; tools return its
   `index_status` plus a `message` while no index is available.
@@ -90,6 +98,9 @@ conftest.py       # fixtures: anyio backend, isolated index data dir, fake downl
 - Do not report transformed rules with `SigmaRule.to_dict()`: after field
   mappings to several fields it prints an OR as an AND.  Use
   `render_detection` instead.
+- `validate_rule` skips validators whose MITRE data `reference_data` has not
+  loaded yet and reports them as `ValidatorSkipped`.  The
+  `reference_data_ready` autouse fixture marks the data as loaded in tests.
 - The `isolated_index` autouse fixture gives each test its own
   `SIGMA_MCP_DATA_DIR` and sets `SIGMA_MCP_NO_WARMUP=1`, because connecting a
   `Client(mcp)` runs the server lifespan.  Tests must never download from the

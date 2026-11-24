@@ -1,5 +1,6 @@
 """Pytest configuration for sigma-mcp-server tests."""
 
+import dataclasses
 import io
 import shutil
 import zipfile
@@ -58,6 +59,23 @@ def isolated_index(
     index_manager.wait(timeout=10)
     index_manager.reset()
     index_manager.downloader = download_rules
+
+
+@pytest.fixture(autouse=True)
+def reference_data_ready() -> Generator[None, None, None]:
+    """Treat the MITRE reference data as loaded, so tests never wait for it.
+
+    The tag validators still run and use pySigma's own data handling.
+    """
+    from sigma.mcp.reference_data import DatasetStatus, reference_data
+
+    original = reference_data.datasets
+    reference_data.datasets = [
+        dataclasses.replace(dataset, status=DatasetStatus.READY) for dataset in original
+    ]
+    yield
+    reference_data.wait(timeout=10)
+    reference_data.datasets = original
 
 
 def copy_fixture_rules(target: Path) -> int:
