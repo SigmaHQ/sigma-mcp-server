@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 from fastmcp import Context
+from sigma.exceptions import SigmaError
+from sigma.rule.base import check_alias_expansion
 
 from sigma.mcp.index_manager import index_manager
 from sigma.mcp.knowledge.logsources import LOGSOURCES
@@ -301,10 +303,18 @@ def get_logsource_info(
 
 
 def _first_documents(rule_yaml: str) -> tuple[str | None, dict[str, str]]:
-    """Return the first title and the first logsource found in *rule_yaml*."""
+    """Return the first title and the first logsource found in *rule_yaml*.
+
+    Raises:
+        yaml.YAMLError: The YAML is invalid.
+        SigmaError: YAML aliases would expand to too many nodes.
+    """
+    documents = list(yaml.safe_load_all(rule_yaml))
+    # Reject alias bombs before any value is turned into text.
+    check_alias_expansion(documents)
     title: str | None = None
     logsource: dict[str, str] = {}
-    for document in yaml.safe_load_all(rule_yaml):
+    for document in documents:
         if not isinstance(document, dict):
             continue
         if title is None and isinstance(document.get("title"), str):
@@ -312,9 +322,9 @@ def _first_documents(rule_yaml: str) -> tuple[str | None, dict[str, str]]:
         raw = document.get("logsource")
         if not logsource and isinstance(raw, dict):
             logsource = {
-                k: str(v)
+                k: v
                 for k, v in raw.items()
-                if k in ("product", "category", "service") and v
+                if k in ("product", "category", "service") and isinstance(v, str) and v
             }
     return title, logsource
 
@@ -343,7 +353,7 @@ def suggest_rule_filename(rule_yaml: str) -> dict[str, Any]:
     """
     try:
         title, logsource = _first_documents(rule_yaml)
-    except yaml.YAMLError as exc:
+    except (yaml.YAMLError, SigmaError) as exc:
         return {"error": f"Invalid YAML: {exc}"}
     if not title or not title.strip():
         return {"error": "The rule needs a non-empty 'title'."}

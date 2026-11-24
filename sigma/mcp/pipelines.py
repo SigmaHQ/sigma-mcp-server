@@ -36,6 +36,7 @@ from sigma.processing.pipeline import ProcessingPipeline
 from sigma.processing.postprocessing import query_postprocessing_transformations
 from sigma.processing.transformations import transformations
 from sigma.rule import SigmaRule
+from sigma.rule.base import check_alias_expansion
 from sigma.rule.detection import SigmaDetection, SigmaDetectionItem
 from sigma.types import (
     CompareOperators,
@@ -78,12 +79,29 @@ class ParsedPipeline:
     document: dict[str, Any] = field(default_factory=dict)
 
 
+MAX_LABEL_LENGTH = 100
+"""Labels are cut to this length; they come from client input."""
+
+
+def _scalar_text(value: object) -> str | None:
+    """Return *value* as text if it is a non-empty scalar, else ``None``.
+
+    Never calls ``str()`` on lists or mappings: their text can be far larger
+    than the YAML they came from.
+    """
+    if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+        text = str(value)
+        if text:
+            return text[:MAX_LABEL_LENGTH]
+    return None
+
+
 def _item_label(position: int, item: object) -> str:
     if isinstance(item, Mapping):
-        identifier = item.get("id")
-        if identifier:
-            return str(identifier)
-        return f"#{position} ({item.get('type', 'unknown')})"
+        identifier = _scalar_text(item.get("id"))
+        if identifier is not None:
+            return identifier
+        return f"#{position} ({_scalar_text(item.get('type')) or 'unknown'})"
     return f"#{position}"
 
 
@@ -125,6 +143,11 @@ def parse_pipeline(pipeline_yaml: str) -> ParsedPipeline:
     try:
         document = yaml.safe_load(pipeline_yaml)
     except yaml.YAMLError as exc:
+        raise PipelineParseError(f"Invalid YAML: {exc}") from exc
+    # Reject alias bombs before anything walks the document as a tree.
+    try:
+        check_alias_expansion(document)
+    except SigmaError as exc:
         raise PipelineParseError(f"Invalid YAML: {exc}") from exc
     if not isinstance(document, dict):
         raise PipelineParseError(

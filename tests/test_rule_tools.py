@@ -325,6 +325,26 @@ class TestSuggestRuleFilenameTool:
         assert error in data["error"]
 
     @pytest.mark.anyio
+    async def test_alias_bomb_is_refused(self) -> None:
+        anchors = ["l0: &l0 [" + ", ".join(["lol"] * 9) + "]"]
+        for n in range(1, 6):
+            anchors.append(f"l{n}: &l{n} [" + ", ".join([f"*l{n - 1}"] * 9) + "]")
+        rule = "title: Some rule title\n" + "\n".join(anchors)
+        rule += "\nlogsource:\n  product: *l5\n"
+        data = await _call("suggest_rule_filename", {"rule_yaml": rule})
+        assert "billion laughs" in data["error"]
+
+    @pytest.mark.anyio
+    async def test_non_string_logsource_values_are_ignored(self) -> None:
+        rule = (
+            "title: Failed Logon\n"
+            "logsource: {product: windows, service: [security], category: 5}\n"
+        )
+        data = await _call("suggest_rule_filename", {"rule_yaml": rule})
+        assert data["filename"] == "failed_logon.yml"
+        assert data["prefix"] == ""
+
+    @pytest.mark.anyio
     @pytest.mark.usefixtures("ready_index")
     async def test_with_index(self) -> None:
         rule = """
