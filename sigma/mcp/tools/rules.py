@@ -26,14 +26,32 @@ from sigma.mcp.validation import (
 _STATE_VALIDATOR_NAMES = "validator_names"
 _STATE_EXCLUSIONS = "excluded_validators"
 
-# Workaround for FastMCP state persistence issue: maintain session state separately
-# Store state at module level as tests run sequentially and clear between tests
+# Fallback for connections without a session (2026-07-28 protocol), where
+# ctx.set_state does not persist between requests.  The process-wide copy is
+# only used on transports that serve a single client (stdio, in-memory): over
+# HTTP it would leak one client's configuration to everybody else.
 _current_validator_names: list[str] | None = None
 _current_exclusions: list[str] = []
 
+_SHARED_TRANSPORTS = ("sse", "streamable-http")
+
+
+def _single_client(ctx: Context) -> bool:
+    """Return ``True`` when this process serves only the calling client."""
+    return ctx.transport not in _SHARED_TRANSPORTS
+
+
+def _unknown(names: list[str]) -> list[str]:
+    return [n for n in names if n not in all_validators]
+
 
 @mcp.tool()
-async def validate_rule(ctx: Context, rule_yaml: str) -> list[dict[str, Any]]:
+async def validate_rule(
+    ctx: Context,
+    rule_yaml: str,
+    validator_names: list[str] | None = None,
+    exclusions: list[str] | None = None,
+) -> list[dict[str, Any]]:
     """Validate Sigma rules using the configured pySigma validators.
 
     Accepts a single rule or several YAML documents separated by ``---``,
@@ -46,6 +64,11 @@ async def validate_rule(ctx: Context, rule_yaml: str) -> list[dict[str, Any]]:
 
     Args:
         rule_yaml: Complete Sigma rule(s) in YAML format.
+        validator_names: Validators to use for this call only, instead of
+            the ones stored with ``configure_validators`` (``null`` = stored
+            configuration, by default all validators).
+        exclusions: Validators to skip for this call only, instead of the
+            stored exclusions.
 
     Returns:
         List of validation issue dicts.  Each dict contains at minimum the keys
@@ -59,15 +82,26 @@ async def validate_rule(ctx: Context, rule_yaml: str) -> list[dict[str, Any]]:
         D3FEND data is not available yet) are not problems with the rule.
         An empty list means no issues were found.
     """
-    validator_names: list[str] | None = await ctx.get_state(_STATE_VALIDATOR_NAMES)
-    raw_exclusions: list[str] | None = await ctx.get_state(_STATE_EXCLUSIONS)
-    # Check module-level cache first, as a workaround for FastMCP state persistence issues
-    if _current_validator_names is not None:
-        validator_names = _current_validator_names
-    if _current_exclusions:
-        raw_exclusions = _current_exclusions
-    exclusions: list[str] = raw_exclusions if raw_exclusions is not None else []
-    active = get_active_validators(validator_names, exclusions)
+    invalid = _unknown((validator_names or []) + (exclusions or []))
+    if invalid:
+        return [
+            {
+                "validator": "configuration",
+                "type": "UnknownValidator",
+                "severity": "high",
+                "description": f"Unknown validators: {invalid}",
+                "rules": [],
+            }
+        ]
+    if validator_names is None:
+        validator_names = await ctx.get_state(_STATE_VALIDATOR_NAMES)
+        if _single_client(ctx) and _current_validator_names is not None:
+            validator_names = _current_validator_names
+    if exclusions is None:
+        exclusions = await ctx.get_state(_STATE_EXCLUSIONS)
+        if _single_client(ctx) and _current_exclusions:
+            exclusions = _current_exclusions
+    active = get_active_validators(validator_names, exclusions or [])
 
     # Validators whose MITRE data is not loaded yet would block on a
     # download; skip them and say so (see sigma.mcp.reference_data).
@@ -106,7 +140,10 @@ async def configure_validators(
     """Configure which pySigma validators are used for rule validation.
 
     The configuration is stored in the MCP session and persists for all
-    subsequent ``validate_rule`` calls within the same session.
+    subsequent ``validate_rule`` calls within the same session.  Over HTTP,
+    clients without a session (protocol 2026-07-28) cannot keep it between
+    calls; pass ``validator_names`` and ``exclusions`` to ``validate_rule``
+    instead.
 
     Args:
         validator_names: Explicit allow-list of validator identifiers to use.
@@ -132,11 +169,21 @@ async def configure_validators(
 
     await ctx.set_state(_STATE_EXCLUSIONS, exc_list)
     await ctx.set_state(_STATE_VALIDATOR_NAMES, validator_names)
-    # Store in module-level variables as a workaround for FastMCP state persistence issues
-    global _current_validator_names, _current_exclusions
-    _current_validator_names = validator_names
-    _current_exclusions = exc_list
-    return {"validator_names": validator_names, "exclusions": exc_list}
+    result: dict[str, Any] = {
+        "validator_names": validator_names,
+        "exclusions": exc_list,
+    }
+    if _single_client(ctx):
+        global _current_validator_names, _current_exclusions
+        _current_validator_names = validator_names
+        _current_exclusions = exc_list
+    else:
+        result["note"] = (
+            "On this shared HTTP server the configuration only persists for "
+            "clients with an MCP session. To be sure, pass validator_names "
+            "and exclusions to validate_rule directly."
+        )
+    return result
 
 
 @mcp.tool()

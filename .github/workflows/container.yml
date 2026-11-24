@@ -1,0 +1,63 @@
+name: Container image
+
+# Builds the image with a fresh SigmaHQ rule index and publishes it as
+# ghcr.io/<owner>/sigma-mcp-server. It runs every Monday so the rules stay
+# current; hosting platforms that pull :latest pick up the new image on their
+# next deployment. Pull requests that touch the image only build it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - .github/workflows/container.yml
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/sigma-mcp-server
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value={{date 'YYYYMMDD'}},enable={{is_default_branch}}
+            type=sha
+            type=ref,event=pr
+
+      - name: Build (and push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # The rule index is downloaded while building: never reuse a cached
+          # layer, or the weekly build would ship last week's rules.
+          no-cache: true

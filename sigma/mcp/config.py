@@ -20,7 +20,36 @@ ENV_NO_WARMUP = "SIGMA_MCP_NO_WARMUP"
 ENV_INDEX_MAX_AGE_DAYS = "SIGMA_MCP_INDEX_MAX_AGE_DAYS"
 """Age in days after which the rule index is refreshed at startup (``0`` = never)."""
 
+ENV_TRANSPORT = "SIGMA_MCP_TRANSPORT"
+"""``stdio`` (default) or ``http`` (Streamable HTTP)."""
+
+ENV_HOST = "SIGMA_MCP_HOST"
+"""Interface the HTTP transport binds to."""
+
+ENV_PORT = "SIGMA_MCP_PORT"
+"""Port of the HTTP transport.  ``PORT`` (set by most hosting platforms) is
+used when this is not set."""
+
+ENV_PUBLIC = "SIGMA_MCP_PUBLIC"
+"""Set to ``1``/``true``/``yes`` to harden the server for public access."""
+
+ENV_MAX_INPUT_BYTES = "SIGMA_MCP_MAX_INPUT_BYTES"
+"""Maximum size of a tool call's arguments in public mode."""
+
+ENV_RATE_LIMIT = "SIGMA_MCP_RATE_LIMIT"
+"""Sustained requests per second and client in public mode (``0`` = off)."""
+
+ENV_MAX_CONCURRENT_TOOLS = "SIGMA_MCP_MAX_CONCURRENT_TOOLS"
+"""Number of tool calls running at the same time in public mode."""
+
 DEFAULT_INDEX_MAX_AGE_DAYS = 7.0
+DEFAULT_TRANSPORT = "stdio"
+TRANSPORTS = ("stdio", "http")
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 8000
+DEFAULT_MAX_INPUT_BYTES = 512 * 1024
+DEFAULT_RATE_LIMIT = 5.0
+DEFAULT_MAX_CONCURRENT_TOOLS = 4
 
 _APP_DIR_NAME = "sigma-mcp-server"
 _TRUE_VALUES = {"1", "true", "yes", "on"}
@@ -69,3 +98,55 @@ def index_max_age() -> timedelta | None:
     if days <= 0:
         return None
     return timedelta(days=days)
+
+
+def _number(name: str, default: float) -> float:
+    """Return the environment variable *name* as a number, or *default*."""
+    raw = os.environ.get(name, "").strip()
+    try:
+        return float(raw) if raw else default
+    except ValueError:
+        return default
+
+
+def transport() -> str:
+    """Return the configured transport, ``stdio`` or ``http``.
+
+    Unknown values fall back to :data:`DEFAULT_TRANSPORT`.
+    """
+    value = os.environ.get(ENV_TRANSPORT, "").strip().lower()
+    return value if value in TRANSPORTS else DEFAULT_TRANSPORT
+
+
+def host() -> str:
+    """Return the interface the HTTP transport binds to."""
+    return os.environ.get(ENV_HOST, "").strip() or DEFAULT_HOST
+
+
+def port() -> int:
+    """Return the HTTP port: ``SIGMA_MCP_PORT``, else ``PORT``, else 8000."""
+    for name in (ENV_PORT, "PORT"):
+        raw = os.environ.get(name, "").strip()
+        if raw.isdigit() and 0 < int(raw) < 65536:
+            return int(raw)
+    return DEFAULT_PORT
+
+
+def public_mode() -> bool:
+    """Return ``True`` when ``SIGMA_MCP_PUBLIC`` is set to a true value."""
+    return os.environ.get(ENV_PUBLIC, "").strip().lower() in _TRUE_VALUES
+
+
+def max_input_bytes() -> int:
+    """Return the maximum size of tool arguments in public mode (``0`` = off)."""
+    return max(int(_number(ENV_MAX_INPUT_BYTES, DEFAULT_MAX_INPUT_BYTES)), 0)
+
+
+def rate_limit() -> float:
+    """Return the sustained requests per second and client (``0`` = off)."""
+    return max(_number(ENV_RATE_LIMIT, DEFAULT_RATE_LIMIT), 0.0)
+
+
+def max_concurrent_tools() -> int:
+    """Return how many tool calls may run at once in public mode (at least 1)."""
+    return max(int(_number(ENV_MAX_CONCURRENT_TOOLS, DEFAULT_MAX_CONCURRENT_TOOLS)), 1)
