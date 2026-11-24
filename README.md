@@ -53,23 +53,29 @@ and other MCP clients.
 ## Requirements
 
 - Python ≥ 3.11
-- [Poetry](https://python-poetry.org/) (for development / installation)
 
 ## Installation
 
+The server is published on [PyPI](https://pypi.org/project/sigma-mcp-server/).
+Run it without installing with [uv](https://docs.astral.sh/uv/):
+
 ```bash
-git clone <repo-url>
-cd sigma-mcp-server
-poetry install
+uvx sigma-mcp-server
 ```
+
+or install it with [pipx](https://pipx.pypa.io/) (or pip):
+
+```bash
+pipx install sigma-mcp-server
+```
+
+For development, see [Development](#development).
 
 ## Usage
 
 ### Running the server
 
 ```bash
-poetry run sigma-mcp-server
-# or, after installation:
 sigma-mcp-server
 ```
 
@@ -94,18 +100,13 @@ Adjust the `command` path to the installed binary if it is not on `PATH`.
 
 ### Using with Claude Code
 
-Install the server so that `sigma-mcp-server` is on your `PATH`, for example
-with [pipx](https://pipx.pypa.io/):
+Register the server with Claude Code; `uvx` downloads and runs it:
 
 ```bash
-pipx install git+https://github.com/SigmaHQ/sigma-mcp-server
+claude mcp add sigma -- uvx sigma-mcp-server
 ```
 
-Then register it with Claude Code:
-
-```bash
-claude mcp add sigma -- sigma-mcp-server
-```
+If you installed it with pipx, use `claude mcp add sigma -- sigma-mcp-server`.
 
 The workflows are available as commands in Claude Code:
 
@@ -270,9 +271,15 @@ detection conditions (e.g. `contains`, `startswith`, `re`, `base64`).
 
 ## Development
 
+Development uses [Poetry](https://python-poetry.org/):
+
 ```bash
-# Install dev dependencies
+git clone https://github.com/SigmaHQ/sigma-mcp-server
+cd sigma-mcp-server
 poetry install
+
+# Run the server from the checkout
+poetry run sigma-mcp-server
 
 # Run tests
 poetry run pytest
@@ -289,6 +296,23 @@ poetry run black sigma/ tests/ conftest.py
 
 Test coverage must remain ≥ 95 %.  All code must pass `mypy --strict` and be
 formatted with `black` in its default configuration.
+
+The GitHub workflow `tests.yml` runs these checks on Python 3.11, 3.12 and
+3.13 for every pull request.
+
+### Releasing
+
+1. Set the new version in `pyproject.toml` (`poetry version <version>`) and
+   merge it into `main`.
+2. Create a GitHub release with the tag `v<version>` (e.g. `v0.2.0`).
+
+The workflow `release.yml` checks that the tag matches the package version,
+runs the tests, builds the package and publishes it to PyPI with
+[trusted publishing](https://docs.pypi.org/trusted-publishers/).  This needs a
+one-time setup: on PyPI, add a trusted publisher for the repository
+`SigmaHQ/sigma-mcp-server` with the workflow `release.yml` and the
+environment `pypi`, and create the environment `pypi` in the repository
+settings.
 
 ## License
 

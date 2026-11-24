@@ -1,0 +1,74 @@
+name: Release
+
+# Publishes the package to PyPI when a GitHub release is published.
+# The release tag must be the package version, optionally prefixed with "v"
+# (e.g. v0.2.0 for version 0.2.0).
+#
+# Uses PyPI trusted publishing, so no API token is stored in GitHub. One-time
+# setup: on PyPI, add a trusted publisher for this repository with workflow
+# "release.yml" and environment "pypi", and create the environment "pypi" in
+# the repository settings.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Test and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Check that the tag matches the package version
+        run: |
+          version="$(poetry version --short)"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$version" != "$tag" ]; then
+            echo "::error::Release tag $GITHUB_REF_NAME does not match package version $version"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: |
+          poetry env use "$(which python)"
+          poetry install --no-interaction
+
+      - name: Run tests
+        run: poetry run pytest
+
+      - name: Build
+        run: poetry build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/sigma-mcp-server/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
