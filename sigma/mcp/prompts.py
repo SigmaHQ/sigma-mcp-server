@@ -5,6 +5,45 @@ from __future__ import annotations
 from fastmcp.prompts import Message
 
 from sigma.mcp.server import mcp
+from sigma.mcp.workflows import PIPELINE_WORKFLOW, SIGMA_RULE_WORKFLOW
+
+
+def _workflow(instructions: str, task: str) -> list[Message]:
+    text = instructions
+    if task.strip():
+        text += f"\n---\n\n## Task\n\n{task.strip()}\n"
+    return [Message(text)]
+
+
+@mcp.prompt
+def create_sigma_rules(task: str = "") -> list[Message]:
+    """Interactive workflow for creating validated Sigma rules.
+
+    Covers understanding the source, proposing detection hypotheses,
+    checking SigmaHQ for existing rules, letting the user choose, picking
+    logsource and fields, drafting, validating and saving.  Without *task*
+    the text serves as system prompt for an agent.
+
+    Args:
+        task: Optional description of what to detect, or a URL of a threat
+            report to create rules from.
+    """
+    return _workflow(SIGMA_RULE_WORKFLOW, task)
+
+
+@mcp.prompt
+def create_processing_pipeline(task: str = "") -> list[Message]:
+    """Interactive workflow for creating a Sigma processing pipeline.
+
+    Covers gathering the target environment, drafting, validating, testing
+    with SigmaHQ rules, analysing coverage and iterating.  Without *task*
+    the text serves as system prompt for an agent.
+
+    Args:
+        task: Optional description of the target environment, e.g.
+            ``"Elastic with ECS, Windows Security and Sysmon logs"``.
+    """
+    return _workflow(PIPELINE_WORKFLOW, task)
 
 
 @mcp.prompt
@@ -44,7 +83,9 @@ def create_sigma_rule_from_description(description: str) -> list[Message]:
             f"Pass the complete YAML as the `rule_yaml` argument.\n"
             f"6. If validate_rule returns any issues, fix them in the YAML and call "
             f"validate_rule again.\n"
-            f"7. Repeat step 6 until validate_rule returns an empty list.\n"
+            f"7. Repeat step 6 until validate_rule returns no issues other "
+            f"than `ValidatorError` or `ValidatorSkipped`, which are not "
+            f"problems with the rule.\n"
             f"8. Use the **suggest_rule_filename** MCP tool to get a file name "
             f"that follows the SigmaHQ conventions "
             f"(e.g. `proc_creation_win_lateral_movement_via_psexec.yml`). "
@@ -97,7 +138,9 @@ def create_sigma_rules_from_url(url: str) -> list[Message]:
             f"Pass the complete YAML as the `rule_yaml` argument.\n"
             f"   f. If validate_rule returns any issues, fix them and call "
             f"validate_rule again.\n"
-            f"   g. Repeat until validate_rule returns an empty list.\n"
+            f"   g. Repeat until validate_rule returns no issues other than "
+            f"`ValidatorError` or `ValidatorSkipped`, which are not problems "
+            f"with the rule.\n"
             f"   h. Use the **suggest_rule_filename** MCP tool to get a file "
             f"name that follows the SigmaHQ conventions "
             f"(e.g. `proc_creation_win_lateral_movement_via_psexec.yml`).\n"
