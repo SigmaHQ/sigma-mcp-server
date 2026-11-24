@@ -821,7 +821,7 @@ class TestMain:
         from sigma.mcp.main import main
 
         with patch.object(mcp, "run") as mock_run:
-            main()
+            main([])
             mock_run.assert_called_once()
 
 

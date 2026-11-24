@@ -13,6 +13,8 @@ from typing import Any
 
 from fastmcp import FastMCP
 from fastmcp.server.transforms import ResourcesAsTools
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from sigma.mcp import config
 from sigma.mcp.index_manager import index_manager
@@ -39,3 +41,14 @@ mcp: FastMCP = FastMCP("sigma-mcp-server", lifespan=lifespan)
 # agents) reach every resource through the list_resources and read_resource
 # tools.
 mcp.add_transform(ResourcesAsTools(mcp))
+
+
+@mcp.custom_route("/health", methods=["GET"], include_in_schema=False)
+async def health(request: Request) -> JSONResponse:
+    """Liveness check for hosting platforms (HTTP transport only).
+
+    Always answers 200 while the process runs; ``index_status`` shows
+    whether the SigmaHQ rule index is ready.
+    """
+    index_manager.get_index()
+    return JSONResponse({"status": "ok", "index_status": index_manager.status.value})

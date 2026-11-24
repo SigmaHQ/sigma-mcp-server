@@ -79,7 +79,16 @@ For development, see [Development](#development).
 sigma-mcp-server
 ```
 
-The server listens on **stdio** by default (standard MCP transport).
+The server listens on **stdio** by default (standard MCP transport).  To
+serve it over HTTP ([Streamable HTTP](https://modelcontextprotocol.io/specification/latest/basic/transports)):
+
+```bash
+sigma-mcp-server --transport http --port 8000
+```
+
+The MCP endpoint is then `http://127.0.0.1:8000/mcp`; `/health` answers
+liveness checks.  To offer the server to everyone, see
+[Running a public server](#running-a-public-server).
 
 ### Configuring in VS Code / Claude Desktop
 
@@ -176,6 +185,91 @@ or `dropped`.
 
 ---
 
+## Running a public server
+
+The server keeps no secrets and only fetches fixed URLs (SigmaHQ on GitHub,
+the Sigma specification, Microsoft's event documentation, MITRE data), so it
+can be offered to everyone without authentication.  Users then add it to
+their client by URL, e.g. `claude mcp add --transport http sigma
+https://<host>/mcp` or as a custom connector in claude.ai.
+
+### Public mode
+
+`--public` (or `SIGMA_MCP_PUBLIC=1`) hardens the server for shared use:
+
+- `update_sigma_repository` is removed; the rule index comes with the
+  deployment (see below).
+- Tool calls with arguments larger than `SIGMA_MCP_MAX_INPUT_BYTES` are
+  rejected.
+- Each client (by IP address) may send `SIGMA_MCP_RATE_LIMIT` requests per
+  second, with bursts of twice as many.
+- At most `SIGMA_MCP_MAX_CONCURRENT_TOOLS` tool calls run at once; further
+  calls wait up to 30 seconds for a slot, then fail with "server busy".
+
+| Environment variable | Default | Description |
+|---|---|---|
+| `SIGMA_MCP_TRANSPORT` | `stdio` | `stdio` or `http` (same as `--transport`) |
+| `SIGMA_MCP_HOST` | `127.0.0.1` | Interface for HTTP; use `0.0.0.0` in containers (`--host`) |
+| `SIGMA_MCP_PORT` | `PORT`, else `8000` | HTTP port (`--port`); hosting platforms usually set `PORT` |
+| `SIGMA_MCP_PUBLIC` | unset | `1` enables public mode (`--public`) |
+| `SIGMA_MCP_MAX_INPUT_BYTES` | `524288` | Maximum size of a tool call's arguments; `0` = unlimited |
+| `SIGMA_MCP_RATE_LIMIT` | `5` | Requests per second and client; `0` = unlimited |
+| `SIGMA_MCP_MAX_CONCURRENT_TOOLS` | `4` | Tool calls running at the same time |
+| `FORWARDED_ALLOW_IPS` | `*` | Proxies whose `X-Forwarded-For` header names the client (uvicorn); restrict it when the server is reachable without a proxy |
+
+Public mode only limits what one process accepts.  Set a request size limit,
+and a budget or instance limit, on the hosting platform as well.
+
+### Container image
+
+The `Dockerfile` builds an image that runs the server in public mode over
+HTTP on port `PORT` (default 8000).  The SigmaHQ rules, the rule index and
+the MITRE data are downloaded **while building**, so containers start at
+once and need no persistent storage:
+
+```bash
+docker build -t sigma-mcp-server .
+docker run --rm -p 8000:8000 sigma-mcp-server
+```
+
+`sigma-mcp-server --prepare` is the build step: it downloads the rules,
+builds the index, caches the MITRE data and exits.
+
+The workflow `.github/workflows/container.yml` builds the image on every
+push to `main` and every Monday, and publishes it as
+`ghcr.io/sigmahq/sigma-mcp-server:latest` (plus a date tag).  Make the
+package public once in the repository's package settings so that hosting
+platforms can pull it without credentials.  Redeploying the latest image
+updates the rules.
+
+### Hosting
+
+Any platform that runs containers works.  Low-cost options:
+
+- **Google Cloud Run** scales to zero, so an idle server costs nothing:
+
+  ```bash
+  gcloud run deploy sigma-mcp-server \
+    --image ghcr.io/sigmahq/sigma-mcp-server:latest \
+    --region europe-west3 --allow-unauthenticated \
+    --memory 1Gi --max-instances 1 --concurrency 20
+  ```
+
+  Cloud Run pulls only from Google registries or Docker Hub: mirror the image
+  to Artifact Registry (a remote repository pointing at ghcr.io), or build
+  it there with `gcloud run deploy --source .`.  `--max-instances 1` caps
+  the costs and keeps MCP sessions on one instance.
+- **Hugging Face Spaces**: create a Docker Space whose `Dockerfile` contains
+  `FROM ghcr.io/sigmahq/sigma-mcp-server:latest`, and set `app_port: 8000`
+  in the Space's `README.md`.  The endpoint is
+  `https://<user>-<space>.hf.space/mcp`.  Free Spaces sleep when unused.
+- **Render, Koyeb, Fly.io** and similar: deploy the image, health check path
+  `/health`.
+- **FastMCP Cloud** and other FastMCP hosts that import the server object:
+  entry point `sigma/mcp/main.py:mcp`, environment `SIGMA_MCP_PUBLIC=1`.
+  These do not run `--prepare`, so the index is built in the background
+  after each start; until then the index tools report its status.
+
 ## Tool Reference
 
 ### `validate_rule`
@@ -189,6 +283,8 @@ references.
 | Name | Type | Description |
 |---|---|---|
 | `rule_yaml` | `string` | Complete Sigma rule(s) in YAML format |
+| `validator_names` | `array[string] \| null` | Validators for this call only; `null` = the configuration stored with `configure_validators` |
+| `exclusions` | `array[string] \| null` | Validators to skip for this call only; `null` = the stored exclusions |
 
 **Returns**
 
@@ -216,7 +312,10 @@ An **empty array** means the rule passed all active validators.
 
 Persist a custom validator configuration for the current MCP session.
 All subsequent `validate_rule` calls within the same session will use this
-configuration.
+configuration.  Over HTTP, clients without an MCP session (protocol
+2026-07-28) cannot keep it between calls, and the configuration never
+affects other clients; pass `validator_names` and `exclusions` to
+`validate_rule` instead.
 
 **Arguments**
 
