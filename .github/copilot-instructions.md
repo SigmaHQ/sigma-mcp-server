@@ -27,6 +27,7 @@ sigma/mcp/
     index_manager.py       # background refresh, states, inter-process file lock
     pipelines.py           # parse (safe policy), validate, apply + render pipelines
     coverage.py            # pipeline coverage via probe rules per logsource/field
+    matching.py            # normalise events, match rules with sigma.matching
     reference_data.py      # background loading of MITRE ATT&CK / D3FEND data
     resources.py           # @mcp.resource handlers
     prompts.py             # @mcp.prompt handlers
@@ -35,6 +36,7 @@ sigma/mcp/
         rules.py           # @mcp.tool handlers for Sigma rules + session state
         index.py           # @mcp.tool handlers for search and statistics
         pipelines.py       # @mcp.tool handlers for processing pipelines
+        matching.py        # @mcp.tool handler for matching rules against events
     knowledge/
         specification.py   # fetch + parse the Sigma specification documents
         windows_events.py  # Windows event index + on-demand event docs
@@ -48,6 +50,7 @@ tests/
     test_config.py, test_repo.py, test_index.py, test_index_manager.py
     test_index_tools.py  # index tools end-to-end through Client(mcp)
     test_pipelines.py, test_coverage.py, test_pipeline_tools.py
+    test_matching.py     # event normalisation, matching and the match_events tool
     test_rule_tools.py   # collections, logsource info, file names, correlation spec
     test_workflows.py    # workflow prompts, resource tools, MITRE reference data
     data/sigma-repo/ # miniature SigmaHQ repository used by the index tests
@@ -102,6 +105,12 @@ CI: `.github/workflows/tests.yml` runs black, mypy and pytest on Python
   `sigma.mcp.pipelines.parse_pipeline`, which applies `PIPELINE_POLICY`
   (pySigma's `SafePolicy`) and refuses template `vars` files.  Never call
   `ProcessingPipeline.from_yaml` / `from_dict` on client input directly.
+- `match_events` matches with `sigma.matching.SigmaMatcher` and the
+  `PIPELINE_POLICY`.  Events are normalised by `matching.prepare_events`
+  (flattening, digit strings to integers), because the matcher looks fields
+  up by exact name.  pySigma does not allow empty logsources, so without a
+  client logsource rules and events get the same placeholder logsource
+  after the pipelines have run.
 - Do not report transformed rules with `SigmaRule.to_dict()`: after field
   mappings to several fields it prints an OR as an AND.  Use
   `render_detection` instead.

@@ -15,6 +15,7 @@ from collections.abc import Sequence
 import sigma.mcp.prompts  # noqa: F401
 import sigma.mcp.resources  # noqa: F401
 import sigma.mcp.tools.index  # noqa: F401
+import sigma.mcp.tools.matching  # noqa: F401
 import sigma.mcp.tools.pipelines  # noqa: F401
 import sigma.mcp.tools.rules  # noqa: F401
 from sigma.mcp import config

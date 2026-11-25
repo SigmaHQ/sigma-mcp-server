@@ -75,12 +75,24 @@ Call `validate_rule` with the complete YAML. Fix all `high` issues, fix
 For a correlation rule, pass the correlation together with the rules it
 references (documents separated by `---`).
 
-### 8. Save the rule
+### 8. Test against events
+If the source, the user or a dataset provides log events of the activity
+(threat report excerpts, sandbox output, attack datasets as JSON or JSON
+Lines), call `match_events` with the rule and the events, and with benign
+events too, if there are any. Check that the malicious events are in
+`matched_events` and the benign ones are not. For a rule that does not match,
+`detections` shows which selection or filter decides and `missing_fields`
+names fields the events do not have; for events with other field names (ECS,
+vendor schemas), pass a processing pipeline with a `field_name_mapping` in
+`pipeline_yamls` instead of renaming the rule's fields. Never invent events to
+make a rule look tested; say when no events were available.
+
+### 9. Save the rule
 When the user wants the rule saved, call `suggest_rule_filename` and write the
 YAML to that file with your client's file tools. If the result lists issues
 (for example a name SigmaHQ already uses), make the title more specific.
 
-### 9. Present the final rule
+### 10. Present the final rule
 Show the rule in a ```yaml block, explain in two or three sentences what it
 detects and why, name known false positives and how to tune them, and suggest
 related detection ideas.
@@ -143,7 +155,9 @@ shell commands or test runners.
 4. **Test with real rules.** Use `search_rules` and `get_rule` to pick
    representative SigmaHQ rules and run them through `apply_pipeline`. Check
    the `field_mappings`, the `unmapped_fields`, the pipeline `state` and the
-   transformed `detections`.
+   transformed `detections`. With log samples from the target, call
+   `match_events` with the rules, the samples and the pipeline to check that
+   the mapped rules match the samples.
 
 5. **Analyse coverage.** Call `analyze_pipeline_coverage` and report:
    - how many logsources and rules are covered, uncovered and unsupported;

@@ -22,6 +22,7 @@ and other MCP clients.
 | `get_index_status` | Report the state of the SigmaHQ rule index |
 | `validate_pipeline` | Validate a processing pipeline (YAML); returns errors, style warnings and a summary of its transformations |
 | `apply_pipeline` | Apply one or more processing pipelines to a rule and show the result: field mappings, failures, state and the transformed detections |
+| `match_events` | Test Sigma rules (including correlations) against log events, e.g. samples from threat reports, sandboxes or attack datasets: which events each rule and each detection matches, and which rule fields the events lack |
 | `analyze_pipeline_coverage` | Measure which SigmaHQ logsources and fields a processing pipeline supports, maps, rejects or leaves untouched |
 | `list_resources` / `read_resource` | List and read every resource below, for clients that support tools but not resources |
 
@@ -191,6 +192,34 @@ coverage analysis then reports `complete: false` with the most used
 logsources; `apply_pipeline` counts the remaining rules in `skipped_rules`.
 `search_rules` uses the first 32 keywords of a query.
 
+### Matching rules against events
+
+`match_events` runs rules against events with pySigma's rule matcher
+(`sigma.matching`), so an agent can check that a new rule detects the events
+of a threat report, a sandbox run or an attack dataset, and stays quiet on
+benign events.  Events are JSON objects (or log lines for keyword rules),
+passed as a list or as text with a JSON array or JSON Lines.  Before
+matching they are normalised:
+
+- Nested objects are flattened to dotted names (`process.executable`); leaf
+  names that occur once in an event are also available on their own, so
+  `{"Event": {"EventData": {"Image": …}}}` matches `Image`.
+- Digit strings are compared as numbers (`"4688"` matches `EventID: 4688`).
+- Lists of values are matched as their elements joined by spaces.
+- Keywords are searched in all values of an event.
+
+Events with other field names than the rules (ECS, vendor schemas) are
+matched by passing processing pipelines (`pipeline_yamls`) that map the
+fields; they are parsed with the same safe policy as above.  With a
+`logsource`, only rules for that logsource are tested; without one, every
+rule is tested against every event.  Correlation rules use the event times
+(`timestamp_field`, or the first of `@timestamp`, `timestamp`, `UtcTime`,
+`TimeCreated`, … an event has); events are matched in time order.
+
+One call accepts at most 10 000 events and stops after
+`SIGMA_MCP_TOOL_TIME_LIMIT` seconds (`complete: false`, the rest counted in
+`unprocessed_events`).
+
 ---
 
 ## Running a public server
@@ -229,7 +258,7 @@ https://<host>/mcp` or as a custom connector in claude.ai.
 | `SIGMA_MCP_MAX_INPUT_BYTES` | `524288` | Maximum size of a tool call's arguments; `0` = unlimited |
 | `SIGMA_MCP_RATE_LIMIT` | `5` | Requests per second and client; `0` = unlimited |
 | `SIGMA_MCP_MAX_CONCURRENT_TOOLS` | `4` | Tool calls running at the same time |
-| `SIGMA_MCP_TOOL_TIME_LIMIT` | `20` | Seconds after which `analyze_pipeline_coverage` and `apply_pipeline` stop with partial results (also outside public mode); `0` = unlimited |
+| `SIGMA_MCP_TOOL_TIME_LIMIT` | `20` | Seconds after which `analyze_pipeline_coverage`, `apply_pipeline` and `match_events` stop with partial results (also outside public mode); `0` = unlimited |
 | `FORWARDED_ALLOW_IPS` | `*` | Proxies whose `X-Forwarded-For` header names the client (uvicorn); restrict it when the server is reachable without a proxy |
 
 Public mode only limits what one process accepts.  Set a request size limit,
@@ -323,6 +352,33 @@ value into up to 125, `base64offset` into 3); larger input is reported with
 `error_class: "TooManyValues"` and not parsed.
 
 An **empty array** means the rule passed all active validators.
+
+---
+
+### `match_events`
+
+Match Sigma rules against log events.
+
+**Arguments**
+
+| Name | Type | Description |
+|---|---|---|
+| `rule_yaml` | `string` | One or more Sigma rules in YAML, separated by `---`; correlation rules together with the rules they reference |
+| `events` | `array \| string` | Events as a list of JSON objects (or log lines), or text with a JSON array or JSON Lines; at most 10 000 |
+| `pipeline_yamls` | `array[string] \| null` | Processing pipelines applied to the rules first, e.g. field mappings to the events' schema |
+| `logsource` | `object \| null` | `product`, `category`, `service` of the events; rules for other logsources are `skipped`. `null` = test every rule against every event |
+| `timestamp_field` | `string \| null` | Field with the event time (ISO 8601 or Unix seconds/milliseconds); `null` = detect it |
+
+**Returns**
+
+| Key | Description |
+|---|---|
+| `complete` | `false` when the time limit stopped matching (`unprocessed_events` counts the rest) |
+| `summary` | Number of rules, rules with matches, events and matched events |
+| `events` | `count`, `timestamp_fields` used, `with_timestamp`, the field names found (most frequent first) |
+| `rules` | Per rule: `status` (`ok`, `failed` when a pipeline rejects the rule, `skipped` for another logsource), `message`, `match_count`, `matched_events` (event positions from 0), `detections` (events matching each named detection on its own) and `missing_fields` (rule fields no event has); correlations list `matches` with their `group` values and events |
+| `events_without_match` | Positions of events no rule matched |
+| `issues`, `event_errors`, `notes` | Rules that could not be parsed, events that could not be matched, hints |
 
 ---
 

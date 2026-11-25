@@ -43,8 +43,8 @@ ENV_MAX_CONCURRENT_TOOLS = "SIGMA_MCP_MAX_CONCURRENT_TOOLS"
 """Number of tool calls running at the same time in public mode."""
 
 ENV_TOOL_TIME_LIMIT = "SIGMA_MCP_TOOL_TIME_LIMIT"
-"""Seconds after which pipeline coverage and application stop with partial
-results (``0`` = no limit)."""
+"""Seconds after which pipeline coverage, pipeline application and event
+matching stop with partial results (``0`` = no limit)."""
 
 DEFAULT_INDEX_MAX_AGE_DAYS = 7.0
 DEFAULT_TRANSPORT = "stdio"

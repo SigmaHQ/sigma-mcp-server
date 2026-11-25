@@ -1,7 +1,7 @@
 [project]
 name = "sigma-mcp-server"
 version = "0.3.1"
-description = "MCP server for Sigma detection engineering: create, validate and search Sigma rules, and build and test processing pipelines with pySigma"
+description = "MCP server for Sigma detection engineering: create, validate, search and test Sigma rules against events, and build and test processing pipelines with pySigma"
 readme = "README.md"
 authors = [
     {name = "Thomas Patzke",email = "thomas@patzke.org"}
