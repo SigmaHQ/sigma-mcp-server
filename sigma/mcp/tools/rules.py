@@ -26,9 +26,9 @@ from sigma.mcp.validation import (
     run_validators,
 )
 
-# Session state keys
-_STATE_VALIDATOR_NAMES = "validator_names"
-_STATE_EXCLUSIONS = "excluded_validators"
+# Session state key.  The allow-list and the exclusions are stored together
+# under one key so that validate_rule always reads a consistent pair.
+_STATE_VALIDATOR_CONFIG = "validator_config"
 
 # Fallback for connections without a session (2026-07-28 protocol), where
 # ctx.set_state does not persist between requests.  The process-wide copy is
@@ -105,14 +105,19 @@ async def validate_rule(
                 "rules": [],
             }
         ]
-    if validator_names is None:
-        validator_names = await ctx.get_state(_STATE_VALIDATOR_NAMES)
-        if _single_client(ctx) and _current_validator_names is not None:
-            validator_names = _current_validator_names
-    if exclusions is None:
-        exclusions = await ctx.get_state(_STATE_EXCLUSIONS)
-        if _single_client(ctx) and _current_exclusions:
-            exclusions = _current_exclusions
+    if validator_names is None or exclusions is None:
+        config: dict[str, Any] = await ctx.get_state(_STATE_VALIDATOR_CONFIG) or {
+            "validator_names": None,
+            "exclusions": [],
+        }
+        if validator_names is None:
+            validator_names = config["validator_names"]
+            if _single_client(ctx) and _current_validator_names is not None:
+                validator_names = _current_validator_names
+        if exclusions is None:
+            exclusions = config["exclusions"]
+            if _single_client(ctx) and _current_exclusions:
+                exclusions = _current_exclusions
     active = get_active_validators(validator_names, exclusions or [])
 
     # Validators whose MITRE data is not loaded yet would block on a
@@ -153,7 +158,12 @@ async def configure_validators(
     """Configure which pySigma validators are used for rule validation.
 
     The configuration is stored in the MCP session and persists for all
-    subsequent ``validate_rule`` calls within the same session.  Over HTTP,
+    subsequent ``validate_rule`` calls within the same session.  FastMCP
+    expires session state 24 hours after it was last written; after that the
+    defaults (all validators, no exclusions) apply again.  A configuration
+    that would leave no validator active is rejected, because
+    ``validate_rule`` would then report every rule as having no issues.
+    Over HTTP,
     clients without a session (protocol 2026-07-28) cannot keep it between
     calls; pass ``validator_names`` and ``exclusions`` to ``validate_rule``
     instead.
@@ -168,7 +178,8 @@ async def configure_validators(
 
     Returns:
         Dict with the stored ``validator_names`` and ``exclusions`` values, or
-        an ``error`` key with a description when unknown identifiers are given.
+        an ``error`` key with a description when unknown identifiers are given
+        or no validator would remain active.  Nothing is stored on error.
     """
     if validator_names is not None:
         invalid = [n for n in validator_names if n not in all_validators]
@@ -180,12 +191,17 @@ async def configure_validators(
     if invalid_exc:
         return {"error": f"Unknown validators in exclusions: {invalid_exc}"}
 
-    await ctx.set_state(_STATE_EXCLUSIONS, exc_list)
-    await ctx.set_state(_STATE_VALIDATOR_NAMES, validator_names)
+    if not get_active_validators(validator_names, exc_list):
+        return {
+            "error": "The configuration leaves no validator active; "
+            "validate_rule would report no issues for every rule."
+        }
+
     result: dict[str, Any] = {
         "validator_names": validator_names,
         "exclusions": exc_list,
     }
+    await ctx.set_state(_STATE_VALIDATOR_CONFIG, dict(result))
     if _single_client(ctx):
         global _current_validator_names, _current_exclusions
         _current_validator_names = validator_names
