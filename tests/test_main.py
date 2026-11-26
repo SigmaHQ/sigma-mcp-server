@@ -816,6 +816,97 @@ class TestFetchSpec:
             _spec_cache.pop(test_url, None)
 
 
+class _SlowCountingClient:
+    """Stand-in for httpx.AsyncClient that counts GETs and answers slowly."""
+
+    def __init__(self, text: str, fail_first: int = 0) -> None:
+        self.text = text
+        self.fail_first = fail_first
+        self.urls: list[str] = []
+
+    def __call__(self, *args: Any, **kwargs: Any) -> _SlowCountingClient:
+        return self
+
+    async def __aenter__(self) -> _SlowCountingClient:
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        return None
+
+    async def get(self, url: str) -> Any:
+        import asyncio
+
+        import httpx
+
+        self.urls.append(url)
+        await asyncio.sleep(0.05)
+        request = httpx.Request("GET", url)
+        if len(self.urls) <= self.fail_first:
+            return httpx.Response(503, request=request)
+        return httpx.Response(200, text=self.text, request=request)
+
+
+class TestConcurrentFetches:
+    @pytest.mark.anyio
+    async def test_concurrent_first_spec_reads_fetch_once(self) -> None:
+        import asyncio
+
+        _spec_cache.pop(SPEC_URL_RULES, None)
+        fake = _SlowCountingClient(_RULES_MD)
+        with patch("sigma.mcp.knowledge.specification.httpx.AsyncClient", new=fake):
+            async with Client(mcp) as client:
+                results = await asyncio.gather(
+                    *[client.read_resource("sigma://specification") for _ in range(8)]
+                )
+        assert fake.urls == [SPEC_URL_RULES]
+        assert all(r[0].text == _RULES_MD for r in results)
+
+    @pytest.mark.anyio
+    async def test_concurrent_first_windows_event_reads_fetch_once(self) -> None:
+        import asyncio
+
+        _win_event_content_cache.pop("4624", None)
+        fake = _SlowCountingClient(_WIN_EVENTS_SAMPLE_MD)
+        try:
+            with patch("sigma.mcp.knowledge.specification.httpx.AsyncClient", new=fake):
+                async with Client(mcp) as client:
+                    results = await asyncio.gather(
+                        *[
+                            client.read_resource("sigma://events/windows/security/4624")
+                            for _ in range(8)
+                        ]
+                    )
+        finally:
+            _win_event_content_cache.pop("4624", None)
+        assert len(fake.urls) == 1
+        assert fake.urls[0].endswith("event-4624.md")
+        assert all("4624" in r[0].text for r in results)
+
+    @pytest.mark.anyio
+    async def test_failed_fetch_is_shared_then_retried(self) -> None:
+        import asyncio
+
+        import httpx
+
+        test_url = "https://example.com/flaky"
+        _spec_cache.pop(test_url, None)
+        fake = _SlowCountingClient("recovered", fail_first=1)
+        try:
+            with patch("sigma.mcp.knowledge.specification.httpx.AsyncClient", new=fake):
+                outcomes = await asyncio.gather(
+                    *[fetch_spec(test_url) for _ in range(4)],
+                    return_exceptions=True,
+                )
+                assert len(fake.urls) == 1
+                assert all(isinstance(o, httpx.HTTPStatusError) for o in outcomes)
+                assert test_url not in _spec_cache
+                # the failure is not cached: the next read fetches again
+                assert await fetch_spec(test_url) == "recovered"
+                assert len(fake.urls) == 2
+        finally:
+            _spec_cache.pop(test_url, None)
+
+
 class TestMain:
     def test_main_calls_mcp_run(self) -> None:
         from sigma.mcp.main import main
@@ -965,7 +1056,7 @@ class TestWindowsEventsResource:
     @pytest.mark.anyio
     async def test_get_windows_event_returns_markdown(self) -> None:
         with patch(
-            "sigma.mcp.knowledge.windows_events.httpx.AsyncClient"
+            "sigma.mcp.knowledge.specification.httpx.AsyncClient"
         ) as mock_client_cls:
             mock_response = mock_client_cls.return_value.__aenter__.return_value
             mock_response.get = mock_response.get
@@ -990,7 +1081,7 @@ class TestWindowsEventsResource:
     @pytest.mark.anyio
     async def test_get_windows_event_cached_after_first_fetch(self) -> None:
         with patch(
-            "sigma.mcp.knowledge.windows_events.httpx.AsyncClient"
+            "sigma.mcp.knowledge.specification.httpx.AsyncClient"
         ) as mock_client_cls:
             mock_response = mock_client_cls.return_value.__aenter__.return_value
 
@@ -1012,7 +1103,7 @@ class TestWindowsEventsResource:
     async def test_get_windows_event_uses_cache_on_second_call(self) -> None:
         _win_event_content_cache["4624"] = _WIN_EVENTS_SAMPLE_MD
         with patch(
-            "sigma.mcp.knowledge.windows_events.httpx.AsyncClient"
+            "sigma.mcp.knowledge.specification.httpx.AsyncClient"
         ) as mock_client_cls:
             async with Client(mcp) as client:
                 contents = await client.read_resource(

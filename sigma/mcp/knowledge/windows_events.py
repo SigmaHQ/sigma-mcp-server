@@ -12,7 +12,7 @@ import importlib.resources
 import json
 import re
 
-import httpx
+from sigma.mcp.knowledge.specification import fetch_cached
 
 WIN_EVENTS_RAW_BASE = (
     "https://raw.githubusercontent.com/duckxing/windows-itpro-docs/master/"
@@ -70,10 +70,5 @@ async def fetch_windows_event(event_id: str) -> str:
     Returns:
         Raw Markdown text of the event documentation page.
     """
-    if event_id not in _win_event_content_cache:
-        url = f"{WIN_EVENTS_RAW_BASE}event-{event_id}.md"
-        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as http:
-            response = await http.get(url)
-            response.raise_for_status()
-            _win_event_content_cache[event_id] = response.text
-    return _win_event_content_cache[event_id]
+    url = f"{WIN_EVENTS_RAW_BASE}event-{event_id}.md"
+    return await fetch_cached(_win_event_content_cache, event_id, url)
