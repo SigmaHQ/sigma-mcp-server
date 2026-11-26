@@ -132,6 +132,45 @@ class TestParseRules:
         assert issues[0]["description"] == "RuntimeError('boom')"
 
 
+class TestUndefinedDetections:
+    @pytest.mark.parametrize(
+        "condition",
+        ["selection and not filter", "selection or missing", "selection and and"],
+    )
+    def test_condition_naming_an_undefined_detection_is_reported(
+        self, condition: str
+    ) -> None:
+        rule = BASE_RULE.replace("condition: selection", f"condition: {condition}")
+        rules, issues = parse_rules(rule)
+        assert rules == []
+        (issue,) = issues
+        assert issue["validator"] == "parser"
+        assert issue["type"] == "SigmaParseError"
+        assert issue["rules"] == ["1f2e3d4c-5b6a-4798-8a7b-6c5d4e3f2a07"]
+
+    def test_undefined_detection_is_named(self) -> None:
+        rule = BASE_RULE.replace("condition: selection", "condition: selection and no")
+        _, issues = parse_rules(rule)
+        assert "not defined in detections" in issues[0]["description"]
+
+    def test_other_rules_of_the_call_are_kept(self) -> None:
+        broken = BASE_RULE.replace("condition: selection", "condition: missing")
+        broken = broken.replace("id: 1f2e3d4c-5b6a-4798-8a7b-6c5d4e3f2a07", "")
+        broken = broken.replace("name: failed_logon\n", "")
+        rules, issues = parse_rules(BASE_RULE + "---" + broken)
+        assert [r.title for r in rules] == ["Failed Logon"]
+        assert len(issues) == 1
+
+    def test_condition_with_defined_detections_passes(self) -> None:
+        rule = BASE_RULE.replace(
+            "    condition: selection",
+            "    filter:\n        User: SYSTEM\n    condition: 1 of sel* and not filter",
+        )
+        rules, issues = parse_rules(rule)
+        assert issues == []
+        assert len(rules) == 1
+
+
 class _CrashingValidator(SigmaRuleValidator):
     def validate(self, rule: Any) -> list[Any]:
         raise ValueError("crash")
@@ -168,6 +207,16 @@ class TestValidateRuleTool:
         issues = await _call("validate_rule", {"rule_yaml": CORRELATION})
         parser = [i for i in issues if i["validator"] == "parser"]
         assert parser[0]["error_class"] == "SigmaRuleNotFoundError"
+
+    @pytest.mark.anyio
+    async def test_undefined_detection_is_not_reported_as_valid(self) -> None:
+        rule = BASE_RULE.replace(
+            "condition: selection", "condition: selection and not filter"
+        )
+        issues = await _call("validate_rule", {"rule_yaml": rule})
+        parser = [i for i in issues if i["validator"] == "parser"]
+        assert len(parser) == 1
+        assert "not defined in detections" in parser[0]["description"]
 
     @pytest.mark.anyio
     async def test_event_loop_stays_responsive(self) -> None:

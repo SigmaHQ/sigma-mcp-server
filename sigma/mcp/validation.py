@@ -103,6 +103,23 @@ def _rule_ref(rule: SigmaRule | SigmaCorrelationRule) -> str:
     return str(rule.id) if rule.id else str(rule.title)
 
 
+def _undefined_detection_error(rule: SigmaRule) -> SigmaError | None:
+    """Return the error of the first condition that cannot be resolved.
+
+    ``SigmaRule.from_yaml`` keeps conditions as unparsed strings, and the core
+    condition validators only check their syntax.  Parsing with
+    postprocessing resolves every detection name a condition refers to, so a
+    condition naming an undefined detection is caught here instead of passing
+    as "no issues".
+    """
+    try:
+        for condition in rule.detection.parsed_condition:
+            condition.parse()
+    except SigmaError as exc:
+        return exc
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Size limit
 # ---------------------------------------------------------------------------
@@ -242,6 +259,17 @@ def parse_rules(
             issues.append(
                 parse_issue(str(error), [_rule_ref(rule)], type(error).__name__)
             )
+        if isinstance(rule, SigmaRule) and not rule.errors:
+            condition_error = _undefined_detection_error(rule)
+            if condition_error is not None:
+                issues.append(
+                    parse_issue(
+                        str(condition_error),
+                        [_rule_ref(rule)],
+                        type(condition_error).__name__,
+                    )
+                )
+                continue
         if not rule.errors:
             valid.append(rule)
     for error in collection.errors:
